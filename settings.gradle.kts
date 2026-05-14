@@ -23,5 +23,10 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "PlaneCube"
+
 include(":app")
- 
+include(":domain")
+include(":network")
+include(":local")
+include(":navigation")
+include(":features:home")
