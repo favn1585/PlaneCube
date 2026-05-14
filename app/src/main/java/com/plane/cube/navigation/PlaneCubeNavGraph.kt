@@ -1,10 +1,13 @@
 package com.plane.cube.navigation
 
+import androidx.navigation.NavController
 import androidx.navigation.NavGraphBuilder
-import com.plane.cube.features.home.homeDestination
+import com.plane.cube.features.area.areaDestination
+import com.plane.cube.features.map.mapDestination
 
-object PlaneCubeNavGraph : (NavGraphBuilder) -> Unit {
-    override fun invoke(builder: NavGraphBuilder) {
-        builder.homeDestination()
-    }
+fun NavGraphBuilder.planeCubeNavGraph(navController: NavController) {
+    mapDestination(onOpenAreaSelection = {
+        navController.navigate(NavigationCommand.AreaSelection.path())
+    })
+    areaDestination(onSaved = { navController.popBackStack() })
 }

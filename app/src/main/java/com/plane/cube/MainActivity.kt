@@ -5,15 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.rememberNavController
 import com.plane.cube.navigation.NavigationCommand
 import com.plane.cube.navigation.Navigator
-import com.plane.cube.navigation.PlaneCubeNavGraph
+import com.plane.cube.navigation.planeCubeNavGraph
 import com.plane.cube.ui.theme.PlaneCubeTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -21,8 +19,7 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
-    @Inject
-    lateinit var navigator: Navigator
+    @Inject lateinit var navigator: Navigator
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,13 +29,12 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 LaunchedEffect(navController) { navigator.bindNavController(navController) }
 
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    NavHost(
-                        navController = navController,
-                        startDestination = NavigationCommand.Home.path(),
-                        modifier = Modifier.padding(innerPadding),
-                        builder = PlaneCubeNavGraph,
-                    )
+                NavHost(
+                    navController = navController,
+                    startDestination = NavigationCommand.Map.path(),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    planeCubeNavGraph(navController)
                 }
             }
         }

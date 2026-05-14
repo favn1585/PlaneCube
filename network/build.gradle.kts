@@ -1,8 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt.android)
+}
+
+private fun localProperty(key: String): String {
+    val file = rootProject.file("local.properties")
+    if (!file.exists()) return ""
+    val props = Properties().apply { file.inputStream().use { load(it) } }
+    return props.getProperty(key).orEmpty()
 }
 
 android {
@@ -16,6 +25,13 @@ android {
     defaultConfig {
         minSdk = 26
         consumerProguardFiles("consumer-rules.pro")
+
+        buildConfigField("String", "OPENSKY_CLIENT_ID", "\"${localProperty("OPENSKY_CLIENT_ID")}\"")
+        buildConfigField("String", "OPENSKY_CLIENT_SECRET", "\"${localProperty("OPENSKY_CLIENT_SECRET")}\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
@@ -33,6 +49,7 @@ dependencies {
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.client.auth)
     implementation(libs.ktor.client.logging)
     implementation(libs.ktor.serialization.kotlinx.json)
 

@@ -1,8 +1,12 @@
 package com.plane.cube.local.di
 
 import android.content.Context
-import androidx.room.Room
-import com.plane.cube.local.PlaneCubeDatabase
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import com.plane.cube.domain.repository.TrackingPreferencesRepository
+import com.plane.cube.local.datastore.trackingDataStore
+import com.plane.cube.local.repository.TrackingPreferencesLocalRepository
+import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -12,14 +16,21 @@ import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
-object LocalModule {
+abstract class LocalBindingsModule {
 
-    private const val DATABASE_NAME = "plane_cube_database.db"
+    @Binds
+    @Singleton
+    abstract fun bindTrackingPreferencesRepository(
+        impl: TrackingPreferencesLocalRepository,
+    ): TrackingPreferencesRepository
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+object LocalModule {
 
     @Provides
     @Singleton
-    fun provideDatabase(@ApplicationContext context: Context): PlaneCubeDatabase =
-        Room.databaseBuilder(context, PlaneCubeDatabase::class.java, DATABASE_NAME)
-            .fallbackToDestructiveMigration(dropAllTables = true)
-            .build()
+    fun provideDataStore(@ApplicationContext context: Context): DataStore<Preferences> =
+        context.trackingDataStore
 }

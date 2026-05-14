@@ -1,7 +1,7 @@
 package com.plane.cube.di
 
-import com.plane.cube.domain.repository.ItemRepository
-import com.plane.cube.repository.ItemRepositoryImpl
+import com.plane.cube.domain.TrackingScheduler
+import com.plane.cube.tracking.WorkManagerTrackingScheduler
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -14,5 +14,5 @@ abstract class AppModule {
 
     @Binds
     @Singleton
-    abstract fun bindItemRepository(impl: ItemRepositoryImpl): ItemRepository
+    abstract fun bindTrackingScheduler(impl: WorkManagerTrackingScheduler): TrackingScheduler
 }

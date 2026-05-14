@@ -49,7 +49,8 @@ sealed class NavigationCommand<T>(
     abstract class NoArgNavigationCommand(destination: String) :
         NavigationCommand<Unit>(destination, Unit.serializer())
 
-    object Home : NoArgNavigationCommand("home")
+    object Map : NoArgNavigationCommand("map")
+    object AreaSelection : NoArgNavigationCommand("area-selection")
 
     companion object {
         private const val ARG_KEY = "arg"
