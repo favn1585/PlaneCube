@@ -53,7 +53,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import android.graphics.Point
 import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.Projection
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.CameraPositionState
@@ -174,9 +176,14 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraState,
                 onMapClick = { latLng ->
-                    viewModel.onIntent(
-                        MapUiIntent.TapMap(GeoPoint(latLng.latitude, latLng.longitude)),
-                    )
+                    if (state.edit.active) {
+                        handleEditTap(
+                            tap = GeoPoint(latLng.latitude, latLng.longitude),
+                            edit = state.edit,
+                            cameraState = cameraState,
+                            onIntent = viewModel::onIntent,
+                        )
+                    }
                 },
                 properties = MapProperties(
                     isMyLocationEnabled = state.hasLocationPermission,
@@ -300,27 +307,21 @@ private fun EditOverlay(
     val position = cameraState.position
     val projection = cameraState.projection ?: return
 
-    val firstScreen = editState.firstCorner?.let {
-        val p = projection.toScreenLocation(it.toLatLng())
-        Offset(p.x.toFloat(), p.y.toFloat())
-    }
-    val secondScreen = editState.secondCorner?.let {
-        val p = projection.toScreenLocation(it.toLatLng())
-        Offset(p.x.toFloat(), p.y.toFloat())
-    }
-
     val area = editState.area
-    val boxScreen: Pair<List<Offset>, List<Offset>>? = if (area != null) {
-        val groundLatLngs = listOf(
-            LatLng(area.south, area.west),
-            LatLng(area.south, area.east),
-            LatLng(area.north, area.east),
-            LatLng(area.north, area.west),
-        )
-        val ground = groundLatLngs.map {
-            val p = projection.toScreenLocation(it)
+    val cornerScreens: List<Offset> = when {
+        area != null -> area.corners.map {
+            val p = projection.toScreenLocation(it.toLatLng())
             Offset(p.x.toFloat(), p.y.toFloat())
         }
+        editState.firstCorner != null -> listOf(
+            projection.toScreenLocation(editState.firstCorner.toLatLng())
+                .let { Offset(it.x.toFloat(), it.y.toFloat()) },
+        )
+        else -> emptyList()
+    }
+
+    val boxScreen: Pair<List<Offset>, List<Offset>>? = if (area != null) {
+        val ground = cornerScreens
         // Local pixels-per-meter at the area centre, sampled along the axis
         // perpendicular to the current camera bearing (i.e. the screen's
         // horizontal axis on the ground plane). That axis is the only one
@@ -387,7 +388,7 @@ private fun EditOverlay(
         val cornerStrokeWidth = 2.dp.toPx()
         val coreRadius = 6.dp.toPx()
         val haloRadius = 14.dp.toPx()
-        listOfNotNull(firstScreen, secondScreen).forEach { centre ->
+        cornerScreens.forEach { centre ->
             drawCircle(cornerHalo, haloRadius, centre)
             drawCircle(cornerFill, coreRadius, centre)
             drawCircle(cornerStroke, coreRadius, centre, style = Stroke(width = cornerStrokeWidth))
@@ -397,14 +398,8 @@ private fun EditOverlay(
 
 @Composable
 private fun AreaPolygon(area: Area) {
-    val points = listOf(
-        LatLng(area.south, area.west),
-        LatLng(area.south, area.east),
-        LatLng(area.north, area.east),
-        LatLng(area.north, area.west),
-    )
     Polygon(
-        points = points,
+        points = area.corners.map { it.toLatLng() },
         fillColor = Color(0x3322AA77),
         strokeColor = Color(0xFF22AA77),
         strokeWidth = 4f,
@@ -472,6 +467,56 @@ private fun AltitudePanel(
 
 internal fun GeoPoint.toLatLng() = LatLng(latitude, longitude)
 
+/**
+ * Handle a tap in edit mode. The first tap stores one corner; the second tap
+ * projects both corners to screen, lays out a screen-aligned rectangle, then
+ * unprojects the four screen corners back to lat/lng so the saved rectangle
+ * is oriented to whatever direction the user is looking at — not to north.
+ */
+private fun handleEditTap(
+    tap: GeoPoint,
+    edit: EditState,
+    cameraState: CameraPositionState,
+    onIntent: (MapUiIntent) -> Unit,
+) {
+    val first = edit.firstCorner
+    val hasArea = edit.area != null
+    if (first == null || hasArea) {
+        onIntent(MapUiIntent.TapFirstCorner(tap))
+        return
+    }
+    val projection = cameraState.projection
+    if (projection == null) {
+        onIntent(MapUiIntent.CompleteArea(Area.of(first, tap)))
+        return
+    }
+    val p1 = projection.toScreenLocation(first.toLatLng())
+    val p3 = projection.toScreenLocation(tap.toLatLng())
+    onIntent(MapUiIntent.CompleteArea(screenAlignedAreaFromDiagonals(p1, p3, projection)))
+}
+
+/** Build a screen-aligned rectangle from two diagonal screen points. */
+private fun screenAlignedAreaFromDiagonals(
+    p1: Point,
+    p3: Point,
+    projection: Projection,
+): Area {
+    val p2 = Point(p3.x, p1.y)
+    val p4 = Point(p1.x, p3.y)
+    val ll1 = projection.fromScreenLocation(p1)
+    val ll2 = projection.fromScreenLocation(p2)
+    val ll3 = projection.fromScreenLocation(p3)
+    val ll4 = projection.fromScreenLocation(p4)
+    return Area(
+        listOf(
+            GeoPoint(ll1.latitude, ll1.longitude),
+            GeoPoint(ll2.latitude, ll2.longitude),
+            GeoPoint(ll3.latitude, ll3.longitude),
+            GeoPoint(ll4.latitude, ll4.longitude),
+        ),
+    )
+}
+
 @Preview(showBackground = true, name = "Permission dialog · initial")
 @Composable
 private fun PermissionDialogInitialPreview() {
@@ -490,19 +535,13 @@ private fun ResetAreaDialogPreview() {
     ResetAreaDialog(onConfirm = {}, onDismiss = {})
 }
 
-private val sampleFirstCorner = GeoPoint(52.10, 20.85)
-private val sampleSecondCorner = GeoPoint(52.35, 21.20)
+private val sampleArea = Area.of(GeoPoint(52.10, 20.85), GeoPoint(52.35, 21.20))
 
 @Preview(showBackground = true, name = "Altitude · area set")
 @Composable
 private fun AltitudePanelAreaSetPreview() {
     AltitudePanel(
-        state = EditState(
-            active = true,
-            firstCorner = sampleFirstCorner,
-            secondCorner = sampleSecondCorner,
-            maxAltitudeMeters = 4_500f,
-        ),
+        state = EditState(active = true, area = sampleArea, maxAltitudeMeters = 1_500f),
         onIntent = {},
     )
 }
@@ -511,7 +550,7 @@ private fun AltitudePanelAreaSetPreview() {
 @Composable
 private fun AltitudePanelNoAreaPreview() {
     AltitudePanel(
-        state = EditState(active = true, maxAltitudeMeters = 2_000f),
+        state = EditState(active = true, maxAltitudeMeters = 500f),
         onIntent = {},
     )
 }
@@ -520,13 +559,7 @@ private fun AltitudePanelNoAreaPreview() {
 @Composable
 private fun AltitudePanelSavingPreview() {
     AltitudePanel(
-        state = EditState(
-            active = true,
-            firstCorner = sampleFirstCorner,
-            secondCorner = sampleSecondCorner,
-            maxAltitudeMeters = 6_000f,
-            saving = true,
-        ),
+        state = EditState(active = true, area = sampleArea, maxAltitudeMeters = 1_800f, saving = true),
         onIntent = {},
     )
 }
@@ -537,9 +570,8 @@ private fun AltitudePanelErrorPreview() {
     AltitudePanel(
         state = EditState(
             active = true,
-            firstCorner = sampleFirstCorner,
-            secondCorner = sampleSecondCorner,
-            maxAltitudeMeters = 3_000f,
+            area = sampleArea,
+            maxAltitudeMeters = 1_000f,
             errorMessage = "Network unavailable",
         ),
         onIntent = {},

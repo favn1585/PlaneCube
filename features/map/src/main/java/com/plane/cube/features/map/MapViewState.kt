@@ -18,19 +18,12 @@ data class MapViewState(
 data class EditState(
     val active: Boolean = false,
     val firstCorner: GeoPoint? = null,
-    val secondCorner: GeoPoint? = null,
+    val area: Area? = null,
     val maxAltitudeMeters: Float = DEFAULT_ALTITUDE_M,
     val adjustingAltitude: Boolean = false,
     val saving: Boolean = false,
     val errorMessage: String? = null,
 ) {
-    val area: Area?
-        get() {
-            val a = firstCorner ?: return null
-            val b = secondCorner ?: return null
-            return Area.of(a, b)
-        }
-
     val canSave: Boolean get() = area != null
 
     companion object {
@@ -48,7 +41,8 @@ sealed class MapUiIntent {
     data object ResetDraftCorners : MapUiIntent()
     data object SaveDraft : MapUiIntent()
     data object ClearPreferences : MapUiIntent()
-    data class TapMap(val point: GeoPoint) : MapUiIntent()
+    data class TapFirstCorner(val point: GeoPoint) : MapUiIntent()
+    data class CompleteArea(val area: Area) : MapUiIntent()
     data class DraftAltitudeChange(val meters: Float) : MapUiIntent()
     data class DraftAltitudeAdjusting(val adjusting: Boolean) : MapUiIntent()
 }

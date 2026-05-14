@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import com.plane.cube.domain.entity.Area
+import com.plane.cube.domain.entity.GeoPoint
 import com.plane.cube.domain.entity.TrackingPreferences
 import com.plane.cube.domain.repository.TrackingPreferencesRepository
 import com.plane.cube.local.datastore.TrackingKeys
@@ -21,23 +22,29 @@ class TrackingPreferencesLocalRepository @Inject constructor(
     override fun observePreferences(): Flow<TrackingPreferences?> =
         dataStore.data.map { prefs ->
             if (!prefs.hasArea()) return@map null
+            val corners = listOf(
+                GeoPoint(prefs[TrackingKeys.Corner0Lat]!!, prefs[TrackingKeys.Corner0Lng]!!),
+                GeoPoint(prefs[TrackingKeys.Corner1Lat]!!, prefs[TrackingKeys.Corner1Lng]!!),
+                GeoPoint(prefs[TrackingKeys.Corner2Lat]!!, prefs[TrackingKeys.Corner2Lng]!!),
+                GeoPoint(prefs[TrackingKeys.Corner3Lat]!!, prefs[TrackingKeys.Corner3Lng]!!),
+            )
             TrackingPreferences(
-                area = Area(
-                    south = prefs[TrackingKeys.South] ?: return@map null,
-                    west = prefs[TrackingKeys.West] ?: return@map null,
-                    north = prefs[TrackingKeys.North] ?: return@map null,
-                    east = prefs[TrackingKeys.East] ?: return@map null,
-                ),
-                maxAltitudeMeters = prefs[TrackingKeys.MaxAltitude] ?: return@map null,
+                area = Area(corners),
+                maxAltitudeMeters = prefs[TrackingKeys.MaxAltitude]!!,
             )
         }
 
     override suspend fun savePreferences(preferences: TrackingPreferences) {
+        val c = preferences.area.corners
         dataStore.edit { prefs ->
-            prefs[TrackingKeys.South] = preferences.area.south
-            prefs[TrackingKeys.West] = preferences.area.west
-            prefs[TrackingKeys.North] = preferences.area.north
-            prefs[TrackingKeys.East] = preferences.area.east
+            prefs[TrackingKeys.Corner0Lat] = c[0].latitude
+            prefs[TrackingKeys.Corner0Lng] = c[0].longitude
+            prefs[TrackingKeys.Corner1Lat] = c[1].latitude
+            prefs[TrackingKeys.Corner1Lng] = c[1].longitude
+            prefs[TrackingKeys.Corner2Lat] = c[2].latitude
+            prefs[TrackingKeys.Corner2Lng] = c[2].longitude
+            prefs[TrackingKeys.Corner3Lat] = c[3].latitude
+            prefs[TrackingKeys.Corner3Lng] = c[3].longitude
             prefs[TrackingKeys.MaxAltitude] = preferences.maxAltitudeMeters
         }
     }

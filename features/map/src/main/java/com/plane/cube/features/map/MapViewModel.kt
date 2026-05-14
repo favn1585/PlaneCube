@@ -45,11 +45,16 @@ class MapViewModel @Inject constructor(
             MapUiIntent.StartEditing -> startEditing()
             MapUiIntent.CancelEditing -> stopEditing()
             MapUiIntent.ResetDraftCorners -> _viewState.update {
-                it.copy(edit = it.edit.copy(firstCorner = null, secondCorner = null))
+                it.copy(edit = it.edit.copy(firstCorner = null, area = null))
             }
             MapUiIntent.SaveDraft -> saveDraft()
             MapUiIntent.ClearPreferences -> clearPreferences()
-            is MapUiIntent.TapMap -> onTapMap(intent)
+            is MapUiIntent.TapFirstCorner -> _viewState.update {
+                it.copy(edit = it.edit.copy(firstCorner = intent.point, area = null))
+            }
+            is MapUiIntent.CompleteArea -> _viewState.update {
+                it.copy(edit = it.edit.copy(area = intent.area))
+            }
             is MapUiIntent.DraftAltitudeChange -> _viewState.update {
                 it.copy(edit = it.edit.copy(maxAltitudeMeters = intent.meters))
             }
@@ -73,8 +78,8 @@ class MapViewModel @Inject constructor(
             val draft = if (seed != null) {
                 EditState(
                     active = true,
-                    firstCorner = seed.area.southWest,
-                    secondCorner = seed.area.northEast,
+                    firstCorner = null,
+                    area = seed.area,
                     maxAltitudeMeters = seed.maxAltitudeMeters.toFloat(),
                 )
             } else {
@@ -89,19 +94,6 @@ class MapViewModel @Inject constructor(
     private fun stopEditing() {
         _viewState.update { it.copy(edit = EditState()) }
         restartTicker(_viewState.value.preferences)
-    }
-
-    private fun onTapMap(intent: MapUiIntent.TapMap) {
-        if (!_viewState.value.edit.active) return
-        _viewState.update { state ->
-            val edit = state.edit
-            val updated = when {
-                edit.firstCorner == null -> edit.copy(firstCorner = intent.point, secondCorner = null)
-                edit.secondCorner == null -> edit.copy(secondCorner = intent.point)
-                else -> edit.copy(firstCorner = intent.point, secondCorner = null)
-            }
-            state.copy(edit = updated)
-        }
     }
 
     private fun saveDraft() {
@@ -160,7 +152,9 @@ class MapViewModel @Inject constructor(
                 .onSuccess { planes ->
                     val filtered = planes.filter { plane ->
                         val altitude = plane.altitudeMeters
-                        altitude != null && altitude <= preferences.maxAltitudeMeters
+                        altitude != null &&
+                            altitude <= preferences.maxAltitudeMeters &&
+                            preferences.area.contains(plane.position)
                     }
                     _viewState.update {
                         it.copy(planes = filtered, isRefreshing = false, errorMessage = null)
