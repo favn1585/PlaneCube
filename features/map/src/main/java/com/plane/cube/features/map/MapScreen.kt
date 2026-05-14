@@ -2,6 +2,7 @@ package com.plane.cube.features.map
 
 import android.Manifest
 import android.os.Build
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -41,7 +43,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -51,7 +56,7 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.Circle
+import com.google.maps.android.compose.CameraPositionState
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapType
@@ -62,6 +67,9 @@ import com.google.maps.android.compose.Polygon
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.plane.cube.domain.entity.Area
 import com.plane.cube.domain.entity.GeoPoint
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sin
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -84,6 +92,8 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
 
     var permissionDismissed by remember { mutableStateOf(false) }
     val showPermissionDialog = !locationGranted && !permissionDismissed
+
+    var showResetDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(locationGranted) {
         if (locationGranted) viewModel.onIntent(MapUiIntent.PermissionGranted)
@@ -138,10 +148,14 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 actions = {
                     if (state.edit.active) {
                         IconButton(onClick = { viewModel.onIntent(MapUiIntent.ResetDraftCorners) }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Reset")
+                            Icon(Icons.Default.Refresh, contentDescription = "Reset corners")
                         }
                         IconButton(onClick = { viewModel.onIntent(MapUiIntent.CancelEditing) }) {
                             Icon(Icons.Default.Close, contentDescription = "Cancel")
+                        }
+                    } else if (state.preferences != null) {
+                        IconButton(onClick = { showResetDialog = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Reset tracking area")
                         }
                     }
                 },
@@ -166,7 +180,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 },
                 properties = MapProperties(
                     isMyLocationEnabled = state.hasLocationPermission,
-                    mapType = MapType.SATELLITE,
+                    mapType = MapType.HYBRID,
                 ),
                 uiSettings = MapUiSettings(
                     zoomControlsEnabled = false,
@@ -175,8 +189,6 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 contentPadding = PaddingValues(top = 56.dp),
             ) {
                 if (state.edit.active) {
-                    state.edit.firstCorner?.let { CornerCircle(it.toLatLng()) }
-                    state.edit.secondCorner?.let { CornerCircle(it.toLatLng()) }
                     state.edit.area?.let { AreaPolygon(it) }
                 } else {
                     state.preferences?.let { prefs -> AreaPolygon(prefs.area) }
@@ -191,6 +203,11 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
             }
 
             if (state.edit.active) {
+                EditOverlay(
+                    editState = state.edit,
+                    cameraState = cameraState,
+                    modifier = Modifier.fillMaxSize(),
+                )
                 AltitudePanel(
                     state = state.edit,
                     onIntent = viewModel::onIntent,
@@ -211,6 +228,37 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
             onDismiss = { permissionDismissed = true },
         )
     }
+
+    if (showResetDialog) {
+        ResetAreaDialog(
+            onConfirm = {
+                viewModel.onIntent(MapUiIntent.ClearPreferences)
+                showResetDialog = false
+            },
+            onDismiss = { showResetDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun ResetAreaDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
+        title = { Text("Reset tracking area?") },
+        text = {
+            Text(
+                "Your saved area and altitude will be cleared. Background alerts will stop until you set a new area.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Reset") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
@@ -243,21 +291,108 @@ private fun PermissionDialog(
 }
 
 @Composable
-private fun CornerCircle(center: LatLng) {
-    Circle(
-        center = center,
-        radius = 1_800.0,
-        fillColor = Color(0x5522AA77),
-        strokeColor = Color(0x00000000),
-        strokeWidth = 0f,
-    )
-    Circle(
-        center = center,
-        radius = 600.0,
-        fillColor = Color(0xFF22AA77),
-        strokeColor = Color(0xFFFFFFFF),
-        strokeWidth = 4f,
-    )
+private fun EditOverlay(
+    editState: EditState,
+    cameraState: CameraPositionState,
+    modifier: Modifier = Modifier,
+) {
+    // Subscribe to camera changes so we repaint on pan / zoom / tilt.
+    val position = cameraState.position
+    val projection = cameraState.projection ?: return
+
+    val firstScreen = editState.firstCorner?.let {
+        val p = projection.toScreenLocation(it.toLatLng())
+        Offset(p.x.toFloat(), p.y.toFloat())
+    }
+    val secondScreen = editState.secondCorner?.let {
+        val p = projection.toScreenLocation(it.toLatLng())
+        Offset(p.x.toFloat(), p.y.toFloat())
+    }
+
+    val area = editState.area
+    val boxScreen: Pair<List<Offset>, List<Offset>>? = if (area != null) {
+        val groundLatLngs = listOf(
+            LatLng(area.south, area.west),
+            LatLng(area.south, area.east),
+            LatLng(area.north, area.east),
+            LatLng(area.north, area.west),
+        )
+        val ground = groundLatLngs.map {
+            val p = projection.toScreenLocation(it)
+            Offset(p.x.toFloat(), p.y.toFloat())
+        }
+        // Local pixels-per-meter at the area centre, sampled along the axis
+        // perpendicular to the current camera bearing (i.e. the screen's
+        // horizontal axis on the ground plane). That axis is the only one
+        // unaffected by tilt foreshortening, and using it keeps the scale
+        // stable as the user rotates the map.
+        val centerLat = area.center.latitude
+        val centerLng = area.center.longitude
+        val centerLatRad = Math.toRadians(centerLat)
+        val perpBearingRad = Math.toRadians(position.bearing.toDouble() + 90.0)
+        val sampleMeters = 100.0
+        val dLat = (sampleMeters / 111_000.0) * cos(perpBearingRad)
+        val dLng = (sampleMeters / (111_000.0 * cos(centerLatRad))) * sin(perpBearingRad)
+        val c = projection.toScreenLocation(LatLng(centerLat, centerLng))
+        val e = projection.toScreenLocation(LatLng(centerLat + dLat, centerLng + dLng))
+        val pixelsPerMeter = (hypot((e.x - c.x).toFloat(), (e.y - c.y).toFloat()) /
+                sampleMeters.toFloat()).coerceAtLeast(0f)
+        val tiltRadians = Math.toRadians(position.tilt.toDouble()).toFloat()
+        val dy = editState.maxAltitudeMeters * pixelsPerMeter * sin(tiltRadians)
+        ground to ground.map { Offset(it.x, it.y - dy) }
+    } else null
+
+    Canvas(modifier = modifier) {
+        val fillColor = Color(0x3322AA77)
+        val strokeColor = Color(0xCC22AA77)
+        val strokeWidth = 2.dp.toPx()
+
+        boxScreen?.let { (ground, top) ->
+            // 4 side faces.
+            for (i in 0 until 4) {
+                val next = (i + 1) % 4
+                val side = Path().apply {
+                    moveTo(ground[i].x, ground[i].y)
+                    lineTo(ground[next].x, ground[next].y)
+                    lineTo(top[next].x, top[next].y)
+                    lineTo(top[i].x, top[i].y)
+                    close()
+                }
+                drawPath(side, fillColor)
+                drawPath(side, strokeColor, style = Stroke(width = strokeWidth))
+            }
+            // Top face.
+            val topPath = Path().apply {
+                moveTo(top[0].x, top[0].y)
+                for (i in 1 until 4) lineTo(top[i].x, top[i].y)
+                close()
+            }
+            drawPath(topPath, fillColor)
+            drawPath(topPath, strokeColor, style = Stroke(width = strokeWidth))
+            // Vertical edges for emphasis.
+            for (i in 0 until 4) {
+                drawLine(
+                    color = strokeColor,
+                    start = ground[i],
+                    end = top[i],
+                    strokeWidth = strokeWidth,
+                )
+            }
+        }
+
+        // Fixed-pixel corner markers (do not zoom with the map).
+        val cornerFill = Color(0xFF22AA77)
+        val cornerHalo = Color(0x5522AA77)
+        val cornerStroke = Color(0xFFFFFFFF)
+        val cornerStrokeWidth = 2.dp.toPx()
+        val coreRadius = 6.dp.toPx()
+        val haloRadius = 14.dp.toPx()
+        listOfNotNull(firstScreen, secondScreen).forEach { centre ->
+            drawCircle(cornerHalo, haloRadius, centre)
+            drawCircle(cornerFill, coreRadius, centre)
+            drawCircle(cornerStroke, coreRadius, centre, style = Stroke(width = cornerStrokeWidth))
+        }
+    }
 }
 
 @Composable
@@ -347,6 +482,12 @@ private fun PermissionDialogInitialPreview() {
 @Composable
 private fun PermissionDialogDeniedPreview() {
     PermissionDialog(rationale = true, onRequest = {}, onDismiss = {})
+}
+
+@Preview(showBackground = true, name = "Reset dialog")
+@Composable
+private fun ResetAreaDialogPreview() {
+    ResetAreaDialog(onConfirm = {}, onDismiss = {})
 }
 
 private val sampleFirstCorner = GeoPoint(52.10, 20.85)

@@ -35,8 +35,8 @@ data class EditState(
 
     companion object {
         const val MIN_ALTITUDE_M = 0f
-        const val MAX_ALTITUDE_M = 12_000f
-        const val DEFAULT_ALTITUDE_M = 3_000f
+        const val MAX_ALTITUDE_M = 2000f
+        const val DEFAULT_ALTITUDE_M = 500f
     }
 }
 
@@ -47,6 +47,7 @@ sealed class MapUiIntent {
     data object CancelEditing : MapUiIntent()
     data object ResetDraftCorners : MapUiIntent()
     data object SaveDraft : MapUiIntent()
+    data object ClearPreferences : MapUiIntent()
     data class TapMap(val point: GeoPoint) : MapUiIntent()
     data class DraftAltitudeChange(val meters: Float) : MapUiIntent()
     data class DraftAltitudeAdjusting(val adjusting: Boolean) : MapUiIntent()

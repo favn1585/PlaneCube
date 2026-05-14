@@ -48,6 +48,7 @@ class MapViewModel @Inject constructor(
                 it.copy(edit = it.edit.copy(firstCorner = null, secondCorner = null))
             }
             MapUiIntent.SaveDraft -> saveDraft()
+            MapUiIntent.ClearPreferences -> clearPreferences()
             is MapUiIntent.TapMap -> onTapMap(intent)
             is MapUiIntent.DraftAltitudeChange -> _viewState.update {
                 it.copy(edit = it.edit.copy(maxAltitudeMeters = intent.meters))
@@ -124,6 +125,15 @@ class MapViewModel @Inject constructor(
                         )
                     }
                 }
+        }
+    }
+
+    private fun clearPreferences() {
+        viewModelScope.launch {
+            runCatching {
+                trackingRepository.clear()
+                scheduler.cancel()
+            }
         }
     }
 
