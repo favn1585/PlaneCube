@@ -58,7 +58,6 @@ dependencies {
     implementation(project(":local"))
     implementation(project(":navigation"))
     implementation(project(":features:map"))
-    implementation(project(":features:area"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

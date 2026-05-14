@@ -2,6 +2,7 @@ package com.plane.cube.features.map
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.plane.cube.domain.TrackingScheduler
 import com.plane.cube.domain.entity.TrackingPreferences
 import com.plane.cube.domain.repository.PlaneRepository
 import com.plane.cube.domain.repository.TrackingPreferencesRepository
@@ -20,6 +21,7 @@ class MapViewModel @Inject constructor(
     private val planeRepository: PlaneRepository,
     private val trackingRepository: TrackingPreferencesRepository,
     private val locationProvider: LocationProvider,
+    private val scheduler: TrackingScheduler,
 ) : ViewModel() {
 
     private val _viewState = MutableStateFlow(MapViewState())
@@ -40,6 +42,19 @@ class MapViewModel @Inject constructor(
         when (intent) {
             MapUiIntent.PermissionGranted -> onPermissionGranted()
             MapUiIntent.RefreshNow -> refresh()
+            MapUiIntent.StartEditing -> startEditing()
+            MapUiIntent.CancelEditing -> stopEditing()
+            MapUiIntent.ResetDraftCorners -> _viewState.update {
+                it.copy(edit = it.edit.copy(firstCorner = null, secondCorner = null))
+            }
+            MapUiIntent.SaveDraft -> saveDraft()
+            is MapUiIntent.TapMap -> onTapMap(intent)
+            is MapUiIntent.DraftAltitudeChange -> _viewState.update {
+                it.copy(edit = it.edit.copy(maxAltitudeMeters = intent.meters))
+            }
+            is MapUiIntent.DraftAltitudeAdjusting -> _viewState.update {
+                it.copy(edit = it.edit.copy(adjustingAltitude = intent.adjusting))
+            }
         }
     }
 
@@ -51,9 +66,70 @@ class MapViewModel @Inject constructor(
         }
     }
 
+    private fun startEditing() {
+        _viewState.update { state ->
+            val seed = state.preferences
+            val draft = if (seed != null) {
+                EditState(
+                    active = true,
+                    firstCorner = seed.area.southWest,
+                    secondCorner = seed.area.northEast,
+                    maxAltitudeMeters = seed.maxAltitudeMeters.toFloat(),
+                )
+            } else {
+                EditState(active = true)
+            }
+            state.copy(edit = draft)
+        }
+        tickerJob?.cancel()
+        _viewState.update { it.copy(planes = emptyList()) }
+    }
+
+    private fun stopEditing() {
+        _viewState.update { it.copy(edit = EditState()) }
+        restartTicker(_viewState.value.preferences)
+    }
+
+    private fun onTapMap(intent: MapUiIntent.TapMap) {
+        if (!_viewState.value.edit.active) return
+        _viewState.update { state ->
+            val edit = state.edit
+            val updated = when {
+                edit.firstCorner == null -> edit.copy(firstCorner = intent.point, secondCorner = null)
+                edit.secondCorner == null -> edit.copy(secondCorner = intent.point)
+                else -> edit.copy(firstCorner = intent.point, secondCorner = null)
+            }
+            state.copy(edit = updated)
+        }
+    }
+
+    private fun saveDraft() {
+        val area = _viewState.value.edit.area ?: return
+        viewModelScope.launch {
+            _viewState.update { it.copy(edit = it.edit.copy(saving = true, errorMessage = null)) }
+            runCatching {
+                trackingRepository.savePreferences(
+                    TrackingPreferences(
+                        area = area,
+                        maxAltitudeMeters = _viewState.value.edit.maxAltitudeMeters.toDouble(),
+                    ),
+                )
+                scheduler.schedule()
+            }
+                .onSuccess { _viewState.update { it.copy(edit = EditState()) } }
+                .onFailure { error ->
+                    _viewState.update {
+                        it.copy(
+                            edit = it.edit.copy(saving = false, errorMessage = error.message),
+                        )
+                    }
+                }
+        }
+    }
+
     private fun restartTicker(preferences: TrackingPreferences?) {
         tickerJob?.cancel()
-        if (preferences == null) {
+        if (preferences == null || _viewState.value.edit.active) {
             _viewState.update { it.copy(planes = emptyList()) }
             return
         }
@@ -67,6 +143,7 @@ class MapViewModel @Inject constructor(
 
     private fun refresh() {
         val preferences = _viewState.value.preferences ?: return
+        if (_viewState.value.edit.active) return
         viewModelScope.launch {
             _viewState.update { it.copy(isRefreshing = true) }
             runCatching { planeRepository.fetchPlanes(preferences.area) }

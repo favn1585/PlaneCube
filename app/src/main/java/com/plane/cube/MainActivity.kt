@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
                     startDestination = NavigationCommand.Map.path(),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    planeCubeNavGraph(navController)
+                    planeCubeNavGraph()
                 }
             }
         }
