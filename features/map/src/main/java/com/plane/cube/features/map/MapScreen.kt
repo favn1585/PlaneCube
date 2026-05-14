@@ -30,6 +30,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -56,6 +59,7 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import android.graphics.Point
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.Projection
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.CameraPositionState
@@ -96,9 +100,16 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     val showPermissionDialog = !locationGranted && !permissionDismissed
 
     var showResetDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(locationGranted) {
         if (locationGranted) viewModel.onIntent(MapUiIntent.PermissionGranted)
+    }
+
+    LaunchedEffect(state.errorMessage) {
+        state.errorMessage?.let {
+            snackbarHostState.showSnackbar(message = it, duration = SnackbarDuration.Long)
+        }
     }
 
     val initialTarget = state.userLocation
@@ -144,6 +155,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(if (state.edit.active) "Select tracking area" else "PlaneCube") },
@@ -199,11 +211,22 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                     state.edit.area?.let { AreaPolygon(it) }
                 } else {
                     state.preferences?.let { prefs -> AreaPolygon(prefs.area) }
+                    val area = state.preferences?.area
                     state.planes.forEach { plane ->
+                        val inside = area?.contains(plane.position) == true
+                        val hue = if (inside) {
+                            BitmapDescriptorFactory.HUE_RED
+                        } else {
+                            BitmapDescriptorFactory.HUE_GREEN
+                        }
                         Marker(
                             state = MarkerState(position = plane.position.toLatLng()),
                             title = plane.callsign ?: plane.icao24,
                             snippet = plane.altitudeMeters?.let { "alt ${it.toInt()} m" },
+                            icon = BitmapDescriptorFactory.defaultMarker(hue),
+                            rotation = plane.trueTrackDegrees?.toFloat() ?: 0f,
+                            flat = true,
+                            anchor = Offset(0.5f, 0.5f),
                         )
                     }
                 }

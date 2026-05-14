@@ -1,13 +1,18 @@
 package com.plane.cube.features.map
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlin.coroutines.cancellation.CancellationException
 import com.plane.cube.domain.TrackingScheduler
+import com.plane.cube.domain.entity.Area
+import com.plane.cube.domain.entity.GeoPoint
 import com.plane.cube.domain.entity.TrackingPreferences
 import com.plane.cube.domain.repository.PlaneRepository
 import com.plane.cube.domain.repository.TrackingPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlin.math.cos
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +38,7 @@ class MapViewModel @Inject constructor(
         viewModelScope.launch {
             trackingRepository.observePreferences().collectLatest { preferences ->
                 _viewState.update { it.copy(preferences = preferences) }
-                restartTicker(preferences)
+                maybeRestartTicker()
             }
         }
     }
@@ -41,7 +46,7 @@ class MapViewModel @Inject constructor(
     fun onIntent(intent: MapUiIntent) {
         when (intent) {
             MapUiIntent.PermissionGranted -> onPermissionGranted()
-            MapUiIntent.RefreshNow -> refresh()
+            MapUiIntent.RefreshNow -> refreshNow()
             MapUiIntent.StartEditing -> startEditing()
             MapUiIntent.CancelEditing -> stopEditing()
             MapUiIntent.ResetDraftCorners -> _viewState.update {
@@ -67,8 +72,17 @@ class MapViewModel @Inject constructor(
     private fun onPermissionGranted() {
         _viewState.update { it.copy(hasLocationPermission = true) }
         viewModelScope.launch {
-            val location = runCatching { locationProvider.currentLocation() }.getOrNull()
+            val location = runCatching { locationProvider.currentLocation() }
+                .onFailure { Log.w(TAG, "Location fetch failed", it) }
+                .getOrNull()
+            Log.d(TAG, "User location resolved: $location")
             _viewState.update { it.copy(userLocation = location) }
+            if (location == null) {
+                _viewState.update {
+                    it.copy(errorMessage = "Couldn't get your location. Enable location services and try again.")
+                }
+            }
+            maybeRestartTicker()
         }
     }
 
@@ -93,7 +107,7 @@ class MapViewModel @Inject constructor(
 
     private fun stopEditing() {
         _viewState.update { it.copy(edit = EditState()) }
-        restartTicker(_viewState.value.preferences)
+        maybeRestartTicker()
     }
 
     private fun saveDraft() {
@@ -129,12 +143,47 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    private fun restartTicker(preferences: TrackingPreferences?) {
-        tickerJob?.cancel()
-        if (preferences == null || _viewState.value.edit.active) {
+    /**
+     * Pick the bbox we'll query OpenSky with, in priority order:
+     *  1. The user's saved tracking area (its lat/lng bbox).
+     *  2. A [RADIUS_METERS] ambient bbox around the user's current location.
+     *  3. Nothing — we can't query.
+     */
+    private fun currentQueryArea(): Area? {
+        val state = _viewState.value
+        state.preferences?.let { return it.area }
+        return state.userLocation?.let { bboxAround(it, RADIUS_METERS) }
+    }
+
+    private fun maybeRestartTicker() {
+        val state = _viewState.value
+        if (state.edit.active) {
+            Log.d(TAG, "Ticker stopped: edit mode active")
+            tickerJob?.cancel()
             _viewState.update { it.copy(planes = emptyList()) }
             return
         }
+        val area = currentQueryArea()
+        if (area == null) {
+            Log.d(
+                TAG,
+                "Ticker stopped: no query area (preferences=${state.preferences != null}, userLocation=${state.userLocation})",
+            )
+            tickerJob?.cancel()
+            _viewState.update { it.copy(planes = emptyList()) }
+            return
+        }
+        // The running ticker reads currentQueryArea() fresh on every iteration,
+        // so any preferences/location update is picked up automatically without
+        // cancelling an in-flight network request.
+        if (tickerJob?.isActive == true) {
+            Log.d(TAG, "Ticker already running; not restarting")
+            return
+        }
+        Log.d(
+            TAG,
+            "Ticker starting with bbox south=${area.south} west=${area.west} north=${area.north} east=${area.east}",
+        )
         tickerJob = viewModelScope.launch {
             while (true) {
                 refresh()
@@ -143,32 +192,61 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    private fun refresh() {
-        val preferences = _viewState.value.preferences ?: return
+    private fun refreshNow() {
+        viewModelScope.launch { refresh() }
+    }
+
+    private suspend fun refresh() {
         if (_viewState.value.edit.active) return
-        viewModelScope.launch {
-            _viewState.update { it.copy(isRefreshing = true) }
-            runCatching { planeRepository.fetchPlanes(preferences.area) }
-                .onSuccess { planes ->
-                    val filtered = planes.filter { plane ->
-                        val altitude = plane.altitudeMeters
-                        altitude != null &&
-                            altitude <= preferences.maxAltitudeMeters &&
-                            preferences.area.contains(plane.position)
-                    }
-                    _viewState.update {
-                        it.copy(planes = filtered, isRefreshing = false, errorMessage = null)
-                    }
+        val area = currentQueryArea() ?: return
+        val maxAltitude = _viewState.value.preferences?.maxAltitudeMeters
+        _viewState.update { it.copy(isRefreshing = true) }
+        try {
+            val planes = planeRepository.fetchPlanes(area)
+            val filtered = if (maxAltitude == null) {
+                planes
+            } else {
+                planes.filter { plane ->
+                    // Keep every plane in the bbox so the map can show both
+                    // in-area (red) and out-of-area (green) markers; just drop
+                    // the ones above the user's altitude ceiling.
+                    val altitude = plane.altitudeMeters
+                    altitude != null && altitude <= maxAltitude
                 }
-                .onFailure { error ->
-                    _viewState.update {
-                        it.copy(isRefreshing = false, errorMessage = error.message)
-                    }
-                }
+            }
+            Log.d(TAG, "OpenSky: ${planes.size} planes in bbox, ${filtered.size} after altitude filter")
+            _viewState.update {
+                it.copy(planes = filtered, isRefreshing = false, errorMessage = null)
+            }
+        } catch (cancellation: CancellationException) {
+            // Don't swallow coroutine cancellation; let it propagate so the
+            // surrounding ticker can stop cleanly.
+            throw cancellation
+        } catch (error: Throwable) {
+            Log.w(TAG, "OpenSky request failed", error)
+            _viewState.update {
+                it.copy(
+                    isRefreshing = false,
+                    errorMessage = "Plane fetch failed: ${error.message ?: error::class.simpleName}",
+                )
+            }
         }
     }
 
+    private fun bboxAround(point: GeoPoint, radiusMeters: Double): Area {
+        val latDelta = radiusMeters / METERS_PER_DEG_LAT
+        val lngDelta = radiusMeters /
+            (METERS_PER_DEG_LAT * cos(Math.toRadians(point.latitude))).coerceAtLeast(1.0)
+        return Area.of(
+            GeoPoint(point.latitude - latDelta, point.longitude - lngDelta),
+            GeoPoint(point.latitude + latDelta, point.longitude + lngDelta),
+        )
+    }
+
     companion object {
+        private const val TAG = "MapViewModel"
         private const val REFRESH_INTERVAL_MS = 30_000L
+        private const val RADIUS_METERS = 25_000.0
+        private const val METERS_PER_DEG_LAT = 111_000.0
     }
 }

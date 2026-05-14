@@ -18,8 +18,14 @@ class LocationProvider @Inject constructor(
 
     @SuppressLint("MissingPermission")
     suspend fun currentLocation(): GeoPoint? {
-        val location = client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
-            ?: client.lastLocation.await()
+        // lastLocation is cached and answers immediately on devices that have
+        // any other Maps-using app open recently; getCurrentLocation is the
+        // fallback when the cache is empty.
+        val cached = runCatching { client.lastLocation.await() }.getOrNull()
+        val location = cached
+            ?: runCatching {
+                client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
+            }.getOrNull()
         return location?.let { GeoPoint(it.latitude, it.longitude) }
     }
 }

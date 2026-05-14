@@ -1,32 +1,21 @@
 package com.plane.cube.network.api
 
-import com.plane.cube.domain.entity.Area
-import com.plane.cube.domain.entity.Plane
-import com.plane.cube.network.auth.OpenSkyTokenProvider
-import com.plane.cube.network.di.OpenSkyClient
 import com.plane.cube.network.model.StatesResponse
-import com.plane.cube.network.model.toPlanes
-import io.ktor.client.HttpClient
-import io.ktor.client.call.body
-import io.ktor.client.request.get
-import io.ktor.client.request.header
-import io.ktor.client.request.parameter
-import io.ktor.http.HttpHeaders
-import javax.inject.Inject
+import retrofit2.http.GET
+import retrofit2.http.Query
 
-class OpenSkyApi @Inject constructor(
-    @OpenSkyClient private val client: HttpClient,
-    private val tokenProvider: OpenSkyTokenProvider,
-) {
-    suspend fun statesIn(area: Area): List<Plane> {
-        val token = tokenProvider.bearer()
-        val response: StatesResponse = client.get("/api/states/all") {
-            header(HttpHeaders.Authorization, "Bearer $token")
-            parameter("lamin", area.south)
-            parameter("lomin", area.west)
-            parameter("lamax", area.north)
-            parameter("lomax", area.east)
-        }.body()
-        return response.toPlanes()
-    }
+/**
+ * Retrofit interface for OpenSky's REST API. Authentication is supplied by
+ * an OkHttp interceptor (see `AuthInterceptor`) so individual methods don't
+ * have to thread the bearer token through.
+ */
+interface OpenSkyApi {
+
+    @GET("/api/states/all")
+    suspend fun states(
+        @Query("lamin") laMin: Double,
+        @Query("lomin") loMin: Double,
+        @Query("lamax") laMax: Double,
+        @Query("lomax") loMax: Double,
+    ): StatesResponse
 }
