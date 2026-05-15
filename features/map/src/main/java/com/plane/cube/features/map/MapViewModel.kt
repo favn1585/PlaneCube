@@ -6,13 +6,11 @@ import androidx.lifecycle.viewModelScope
 import kotlin.coroutines.cancellation.CancellationException
 import com.plane.cube.domain.TrackingScheduler
 import com.plane.cube.domain.entity.Area
-import com.plane.cube.domain.entity.GeoPoint
 import com.plane.cube.domain.entity.TrackingPreferences
 import com.plane.cube.domain.repository.PlaneRepository
 import com.plane.cube.domain.repository.TrackingPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlin.math.cos
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,7 +64,17 @@ class MapViewModel @Inject constructor(
             is MapUiIntent.DraftAltitudeAdjusting -> _viewState.update {
                 it.copy(edit = it.edit.copy(adjustingAltitude = intent.adjusting))
             }
+            is MapUiIntent.UpdateVisibleArea -> updateVisibleArea(intent.area)
         }
+    }
+
+    private fun updateVisibleArea(area: Area) {
+        Log.d(
+            TAG,
+            "UpdateVisibleArea south=${area.south} west=${area.west} north=${area.north} east=${area.east}",
+        )
+        _viewState.update { it.copy(visibleArea = area) }
+        maybeRestartTicker()
     }
 
     private fun onPermissionGranted() {
@@ -144,16 +152,11 @@ class MapViewModel @Inject constructor(
     }
 
     /**
-     * Pick the bbox we'll query OpenSky with, in priority order:
-     *  1. The user's saved tracking area (its lat/lng bbox).
-     *  2. A [RADIUS_METERS] ambient bbox around the user's current location.
-     *  3. Nothing — we can't query.
+     * Query OpenSky with whatever bbox the user is currently looking at. The
+     * saved tracking area, if any, is only used for the red/white coloring and
+     * for the background WorkManager notification check — not for the fetch.
      */
-    private fun currentQueryArea(): Area? {
-        val state = _viewState.value
-        state.preferences?.let { return it.area }
-        return state.userLocation?.let { bboxAround(it, RADIUS_METERS) }
-    }
+    private fun currentQueryArea(): Area? = _viewState.value.visibleArea
 
     private fun maybeRestartTicker() {
         val state = _viewState.value
@@ -173,17 +176,20 @@ class MapViewModel @Inject constructor(
             _viewState.update { it.copy(planes = emptyList()) }
             return
         }
-        // The running ticker reads currentQueryArea() fresh on every iteration,
-        // so any preferences/location update is picked up automatically without
-        // cancelling an in-flight network request.
-        if (tickerJob?.isActive == true) {
-            Log.d(TAG, "Ticker already running; not restarting")
-            return
-        }
         Log.d(
             TAG,
-            "Ticker starting with bbox south=${area.south} west=${area.west} north=${area.north} east=${area.east}",
+            "maybeRestartTicker bbox south=${area.south} west=${area.west} north=${area.north} east=${area.east}",
         )
+        // The running ticker reads currentQueryArea() fresh on every iteration,
+        // so the next tick will pick up any preferences/location change. But
+        // we also fire an immediate parallel refresh so the user doesn't have
+        // to wait up to 30s when their location resolves after startup.
+        if (tickerJob?.isActive == true) {
+            Log.d(TAG, "Ticker already running; triggering an immediate refresh")
+            viewModelScope.launch { refresh() }
+            return
+        }
+        Log.d(TAG, "Starting ticker")
         tickerJob = viewModelScope.launch {
             while (true) {
                 refresh()
@@ -233,20 +239,8 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    private fun bboxAround(point: GeoPoint, radiusMeters: Double): Area {
-        val latDelta = radiusMeters / METERS_PER_DEG_LAT
-        val lngDelta = radiusMeters /
-            (METERS_PER_DEG_LAT * cos(Math.toRadians(point.latitude))).coerceAtLeast(1.0)
-        return Area.of(
-            GeoPoint(point.latitude - latDelta, point.longitude - lngDelta),
-            GeoPoint(point.latitude + latDelta, point.longitude + lngDelta),
-        )
-    }
-
     companion object {
         private const val TAG = "MapViewModel"
         private const val REFRESH_INTERVAL_MS = 30_000L
-        private const val RADIUS_METERS = 25_000.0
-        private const val METERS_PER_DEG_LAT = 111_000.0
     }
 }

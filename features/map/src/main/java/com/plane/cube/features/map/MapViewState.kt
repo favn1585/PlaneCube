@@ -13,6 +13,8 @@ data class MapViewState(
     val isRefreshing: Boolean = false,
     val errorMessage: String? = null,
     val edit: EditState = EditState(),
+    /** The lat/lng bbox the user is currently looking at on the map. */
+    val visibleArea: Area? = null,
 )
 
 data class EditState(
@@ -45,4 +47,6 @@ sealed class MapUiIntent {
     data class CompleteArea(val area: Area) : MapUiIntent()
     data class DraftAltitudeChange(val meters: Float) : MapUiIntent()
     data class DraftAltitudeAdjusting(val adjusting: Boolean) : MapUiIntent()
+    /** Emitted by the screen when the camera has been idle for the debounce window. */
+    data class UpdateVisibleArea(val area: Area) : MapUiIntent()
 }

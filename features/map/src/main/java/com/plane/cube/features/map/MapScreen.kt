@@ -50,6 +50,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -59,7 +60,6 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import android.graphics.Point
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.Projection
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.CameraPositionState
@@ -76,6 +76,8 @@ import com.plane.cube.domain.entity.GeoPoint
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
+
+private const val CAMERA_IDLE_DEBOUNCE_MS = 5_000L
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -128,6 +130,22 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 )
             }
         }
+    }
+
+    // When the user stops panning/zooming, debounce 5s, then push the current
+    // visible region to the VM so it can fetch planes. While editing, the VM
+    // ignores fetches, so we skip the side effect entirely.
+    LaunchedEffect(cameraState.isMoving, state.edit.active) {
+        if (state.edit.active) return@LaunchedEffect
+        if (cameraState.isMoving) return@LaunchedEffect
+        kotlinx.coroutines.delay(CAMERA_IDLE_DEBOUNCE_MS)
+        val projection = cameraState.projection ?: return@LaunchedEffect
+        val bounds = projection.visibleRegion.latLngBounds
+        val area = Area.of(
+            GeoPoint(bounds.southwest.latitude, bounds.southwest.longitude),
+            GeoPoint(bounds.northeast.latitude, bounds.northeast.longitude),
+        )
+        viewModel.onIntent(MapUiIntent.UpdateVisibleArea(area))
     }
 
     LaunchedEffect(state.edit.adjustingAltitude, state.edit.area?.center) {
@@ -212,21 +230,26 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 } else {
                     state.preferences?.let { prefs -> AreaPolygon(prefs.area) }
                     val area = state.preferences?.area
+                    val density = LocalDensity.current.density
                     state.planes.forEach { plane ->
                         val inside = area?.contains(plane.position) == true
-                        val hue = if (inside) {
-                            BitmapDescriptorFactory.HUE_RED
-                        } else {
-                            BitmapDescriptorFactory.HUE_GREEN
+                        val heading = plane.trueTrackDegrees?.toFloat() ?: 0f
+                        val altitudeM = plane.altitudeMeters?.toInt()
+                        val icon = remember(plane.icao24, heading, altitudeM, inside, density) {
+                            PlaneIcon.create(
+                                headingDegrees = heading,
+                                altitudeMeters = altitudeM,
+                                inside = inside,
+                                density = density,
+                            )
                         }
                         Marker(
                             state = MarkerState(position = plane.position.toLatLng()),
                             title = plane.callsign ?: plane.icao24,
-                            snippet = plane.altitudeMeters?.let { "alt ${it.toInt()} m" },
-                            icon = BitmapDescriptorFactory.defaultMarker(hue),
-                            rotation = plane.trueTrackDegrees?.toFloat() ?: 0f,
+                            snippet = altitudeM?.let { "alt ${it} m" },
+                            icon = icon,
                             flat = true,
-                            anchor = Offset(0.5f, 0.5f),
+                            anchor = Offset(0.5f, PlaneIcon.anchorY),
                         )
                     }
                 }
