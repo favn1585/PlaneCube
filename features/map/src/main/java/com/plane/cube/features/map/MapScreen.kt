@@ -39,8 +39,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -77,7 +79,7 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 
-private const val CAMERA_IDLE_DEBOUNCE_MS = 5_000L
+private const val CAMERA_IDLE_DEBOUNCE_MS = 1_000L
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -229,28 +231,32 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                     state.edit.area?.let { AreaPolygon(it) }
                 } else {
                     state.preferences?.let { prefs -> AreaPolygon(prefs.area) }
-                    val area = state.preferences?.area
                     val density = LocalDensity.current.density
                     state.planes.forEach { plane ->
-                        val inside = area?.contains(plane.position) == true
-                        val heading = plane.trueTrackDegrees?.toFloat() ?: 0f
-                        val altitudeM = plane.altitudeMeters?.toInt()
-                        val icon = remember(plane.icao24, heading, altitudeM, inside, density) {
-                            PlaneIcon.create(
-                                headingDegrees = heading,
-                                altitudeMeters = altitudeM,
-                                inside = inside,
-                                density = density,
+                        // key() ties each marker's state + icon cache to the
+                        // aircraft identity, so at 1 Hz they move/update in
+                        // place instead of being torn down and recreated.
+                        key(plane.icao24) {
+                            val heading = plane.trueTrackDegrees?.toFloat() ?: 0f
+                            val altitudeM = plane.altitudeMeters?.toInt()
+                            val icon = remember(heading, altitudeM, density) {
+                                PlaneIcon.create(
+                                    headingDegrees = heading,
+                                    altitudeMeters = altitudeM,
+                                    density = density,
+                                )
+                            }
+                            val markerState = remember { MarkerState(plane.position.toLatLng()) }
+                            SideEffect { markerState.position = plane.position.toLatLng() }
+                            Marker(
+                                state = markerState,
+                                title = plane.callsign ?: plane.icao24,
+                                snippet = altitudeM?.let { "alt ${it} m" },
+                                icon = icon,
+                                flat = true,
+                                anchor = Offset(0.5f, PlaneIcon.anchorY),
                             )
                         }
-                        Marker(
-                            state = MarkerState(position = plane.position.toLatLng()),
-                            title = plane.callsign ?: plane.icao24,
-                            snippet = altitudeM?.let { "alt ${it} m" },
-                            icon = icon,
-                            flat = true,
-                            anchor = Offset(0.5f, PlaneIcon.anchorY),
-                        )
                     }
                 }
             }

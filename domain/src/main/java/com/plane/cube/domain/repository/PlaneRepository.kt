@@ -5,5 +5,5 @@ import com.plane.cube.domain.entity.Plane
 
 interface PlaneRepository {
 
-    suspend fun fetchPlanes(area: Area): List<Plane>
+    suspend fun fetchPlanes(): List<Plane>
 }

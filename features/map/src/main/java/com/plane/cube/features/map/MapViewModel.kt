@@ -204,11 +204,10 @@ class MapViewModel @Inject constructor(
 
     private suspend fun refresh() {
         if (_viewState.value.edit.active) return
-        val area = currentQueryArea() ?: return
         val maxAltitude = _viewState.value.preferences?.maxAltitudeMeters
         _viewState.update { it.copy(isRefreshing = true) }
         try {
-            val planes = planeRepository.fetchPlanes(area)
+            val planes = planeRepository.fetchPlanes()
             val filtered = if (maxAltitude == null) {
                 planes
             } else {
@@ -241,6 +240,6 @@ class MapViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "MapViewModel"
-        private const val REFRESH_INTERVAL_MS = 30_000L
+        private const val REFRESH_INTERVAL_MS = 1_000L
     }
 }

@@ -22,10 +22,14 @@ class PlaneCheckWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         val preferences = trackingRepository.observePreferences().first() ?: return Result.success()
         return runCatching {
-            val planes = planeRepository.fetchPlanes(preferences.area)
+            // The repo no longer filters by area (the map wants every plane),
+            // so the worker has to do its own in-polygon + altitude check.
+            val planes = planeRepository.fetchPlanes()
             val inCube = planes.filter { plane ->
                 val altitude = plane.altitudeMeters
-                altitude != null && altitude <= preferences.maxAltitudeMeters
+                altitude != null &&
+                    altitude <= preferences.maxAltitudeMeters &&
+                    preferences.area.contains(plane.position)
             }
             if (inCube.isNotEmpty()) notifier.notifyPlanes(inCube)
             Result.success()

@@ -4,101 +4,147 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.Typeface
+import androidx.core.graphics.PathParser
 import com.google.android.gms.maps.model.BitmapDescriptor
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 
 /**
- * Builds a marker bitmap for a plane: a silhouette rotated to the heading,
- * with the altitude printed below in upright text. The combined bitmap is
- * meant to be used with `Marker(flat = true)` so the silhouette stays
- * correctly oriented to north as the user pans/rotates the map; the altitude
- * text will rotate with the map, which is the trade-off for keeping it to one
- * marker per plane.
+ * Builds a marker bitmap for a plane: an SVG paper-airplane silhouette rotated
+ * to heading, colored on a red↔green gradient by altitude, with the altitude
+ * printed below in upright text.
  *
- * The plane's "center" sits at y = `planeSize / 2` from the top of the bitmap;
- * the rendered altitude label hangs below it. Use anchor `(0.5, ~0.33)` on
- * the `Marker` so the plane center lands on the lat/lng position.
+ * Coloring rule:
+ *  - altitude unknown or ≥ 2000 m → fully green
+ *  - 0 m → fully red
+ *  - in between → linear RGB interpolation between red (0) and green (2000)
+ * All planes get a 2 dp black border for contrast against satellite imagery.
+ *
+ * The plane sits in the upper portion of the bitmap, label hangs below.
+ * Anchor with `(0.5, PlaneIcon.anchorY)` on the marker so the plane center
+ * lands on the lat/lng position.
  */
 internal object PlaneIcon {
 
     private const val PLANE_DP = 40f
+    // Square area around the plane that contains it at any rotation. Needs
+    // to be at least PLANE_DP * sqrt(2) ≈ 1.414 × PLANE_DP so the corners
+    // don't get clipped when the icon is rotated 45°.
+    private const val PLANE_BOX_DP = 60f
     private const val LABEL_DP = 14f
     private const val LABEL_GAP_DP = 2f
 
+    // SVG viewBox is 0 0 122.88 122.88; the path's tip points to the upper-
+    // right (45° CW from up), so we counter-rotate by NATURAL_ROTATION_DEG so
+    // heading=0 (north) makes the nose point straight up on screen.
+    private const val SVG_SIZE = 122.88f
+    private const val NATURAL_ROTATION_DEG = 45f
+
+    private const val SVG_PATH_DATA =
+        "M16.63,105.75c0.01-4.03,2.3-7.97,6.03-12.38" +
+            "L1.09,79.73c-1.36-0.59-1.33-1.42-0.54-2.4" +
+            "l4.57-3.9c0.83-0.51,1.71-0.73,2.66-0.47" +
+            "l26.62,4.5l22.18-24.02" +
+            "L4.8,18.41c-1.31-0.77-1.42-1.64-0.07-2.65" +
+            "l7.47-5.96l67.5,18.97" +
+            "L99.64,7.45c6.69-5.79,13.19-8.38,18.18-7.15" +
+            "c2.75,0.68,3.72,1.5,4.57,4.08" +
+            "c1.65,5.06-0.91,11.86-6.96,18.86" +
+            "L94.11,43.18l18.97,67.5" +
+            "l-5.96,7.47c-1.01,1.34-1.88,1.23-2.65-0.07" +
+            "L69.43,66.31L45.41,88.48" +
+            "l4.5,26.62c0.26,0.94,0.05,1.82-0.47,2.66" +
+            "l-3.9,4.57c-0.97,0.79-1.81,0.82-2.4-0.54" +
+            "l-13.64-21.57c-4.43,3.74-8.37,6.03-12.42,6.03" +
+            "C16.71,106.24,16.63,106.11,16.63,105.75" +
+            "L16.63,105.75z"
+
+    private val sourcePath = PathParser.createPathFromPathData(SVG_PATH_DATA)
+
+    /** Color anchors for the altitude gradient (Material red 600 ↔ green 600). */
+    private const val RED_R = 0xE5
+    private const val RED_G = 0x39
+    private const val RED_B = 0x35
+    private const val GREEN_R = 0x34
+    private const val GREEN_G = 0xA8
+    private const val GREEN_B = 0x53
+    private const val GREEN_CEILING_M = 2000
+
     /** Anchor for the produced bitmap so the plane's center lands on the point. */
-    val anchorY: Float = (PLANE_DP / 2f) / (PLANE_DP + LABEL_GAP_DP + LABEL_DP)
+    val anchorY: Float = (PLANE_BOX_DP / 2f) / (PLANE_BOX_DP + LABEL_GAP_DP + LABEL_DP)
 
     fun create(
         headingDegrees: Float,
         altitudeMeters: Int?,
-        inside: Boolean,
         density: Float,
     ): BitmapDescriptor {
         val planeSizePx = PLANE_DP * density
+        val planeBoxPx = PLANE_BOX_DP * density
         val labelHeightPx = LABEL_DP * density
         val labelGapPx = LABEL_GAP_DP * density
 
-        val width = (planeSizePx * 1.4f).toInt()
-        val height = (planeSizePx + labelGapPx + labelHeightPx).toInt()
+        // Bitmap = a square big enough to hold the rotated plane + label below.
+        val width = planeBoxPx.toInt()
+        val height = (planeBoxPx + labelGapPx + labelHeightPx).toInt()
 
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        val fillColor = if (inside) Color.RED else Color.WHITE
-        val strokeColor = if (inside) Color.WHITE else Color.BLACK
+        val fillColor = colorForAltitude(altitudeMeters)
+        val borderColor = Color.BLACK
+        val borderDp = 2f
+        val borderPx = borderDp * density
 
+        // Plane sits centered in the upper square (planeBoxPx × planeBoxPx).
         val centerX = width / 2f
-        val planeCenterY = planeSizePx / 2f
+        val planeCenterY = planeBoxPx / 2f
 
-        // ----- airliner silhouette (top-down view), rotated to heading -----
+        // ----- SVG-based plane silhouette, rotated to heading -----
         canvas.save()
-        canvas.rotate(headingDegrees, centerX, planeCenterY)
-        val s = planeSizePx / 2f // half size; coordinates below are factors of s
-        val path = Path().apply {
-            // Start at the nose, walk clockwise around the airframe.
-            moveTo(centerX,                  planeCenterY - 1.00f * s)  // nose tip
-            lineTo(centerX + 0.06f * s,      planeCenterY - 0.55f * s)  // fuselage right, near nose
-            // Main wing (right side): swept leading edge → tip → trailing edge → wing root.
-            lineTo(centerX + 1.00f * s,      planeCenterY - 0.05f * s)  // right wingtip leading edge
-            lineTo(centerX + 1.00f * s,      planeCenterY + 0.05f * s)  // right wingtip trailing edge
-            lineTo(centerX + 0.08f * s,      planeCenterY + 0.18f * s)  // wing root trailing
-            // Fuselage tapering toward the tail.
-            lineTo(centerX + 0.06f * s,      planeCenterY + 0.55f * s)  // before tailplane
-            // Horizontal stabilizer (right side).
-            lineTo(centerX + 0.38f * s,      planeCenterY + 0.72f * s)  // right tailplane tip leading
-            lineTo(centerX + 0.38f * s,      planeCenterY + 0.82f * s)  // right tailplane tip trailing
-            lineTo(centerX + 0.06f * s,      planeCenterY + 0.90f * s)  // tailplane root trailing
-            // Tail cone.
-            lineTo(centerX + 0.05f * s,      planeCenterY + 1.00f * s)
-            lineTo(centerX - 0.05f * s,      planeCenterY + 1.00f * s)
-            // Mirror back up the left side.
-            lineTo(centerX - 0.06f * s,      planeCenterY + 0.90f * s)
-            lineTo(centerX - 0.38f * s,      planeCenterY + 0.82f * s)
-            lineTo(centerX - 0.38f * s,      planeCenterY + 0.72f * s)
-            lineTo(centerX - 0.06f * s,      planeCenterY + 0.55f * s)
-            lineTo(centerX - 0.08f * s,      planeCenterY + 0.18f * s)
-            lineTo(centerX - 1.00f * s,      planeCenterY + 0.05f * s)
-            lineTo(centerX - 1.00f * s,      planeCenterY - 0.05f * s)
-            lineTo(centerX - 0.06f * s,      planeCenterY - 0.55f * s)
-            close()
-        }
-        canvas.drawPath(path, fillPaint(fillColor))
-        canvas.drawPath(path, strokePaint(strokeColor, 1.4f * density))
+        canvas.translate(centerX, planeCenterY)
+        canvas.rotate(headingDegrees - NATURAL_ROTATION_DEG)
+        val scale = planeSizePx / SVG_SIZE
+        canvas.scale(scale, scale)
+        canvas.translate(-SVG_SIZE / 2f, -SVG_SIZE / 2f)
+        canvas.drawPath(sourcePath, fillPaint(fillColor))
+        // Stroke width is given in screen pixels (borderPx). Because we're
+        // drawing in pre-scaled path units, divide by `scale` so the stroke
+        // ends up the requested screen thickness.
+        canvas.drawPath(sourcePath, strokePaint(borderColor, borderPx / scale))
         canvas.restore()
 
-        // ----- altitude label, upright -----
+        // ----- altitude label, upright, just below the rotation box -----
         if (altitudeMeters != null) {
             val text = "${altitudeMeters} m"
-            val textY = planeSizePx + labelGapPx + labelHeightPx * 0.82f
-
-            canvas.drawText(text, centerX, textY, textOutlinePaint(strokeColor, 11f * density, 2.5f * density))
-            canvas.drawText(text, centerX, textY, textFillPaint(fillColor, 11f * density))
+            val textY = planeBoxPx + labelGapPx + labelHeightPx * 0.82f
+            canvas.drawText(
+                text,
+                centerX,
+                textY,
+                textOutlinePaint(Color.BLACK, 11f * density, 2.5f * density),
+            )
+            canvas.drawText(text, centerX, textY, textFillPaint(Color.WHITE, 11f * density))
         }
 
         return BitmapDescriptorFactory.fromBitmap(bitmap)
     }
+
+    /** Pure green at/above [GREEN_CEILING_M], linear RGB ramp toward red as
+     *  altitude drops to 0. Null altitude defaults to green. */
+    private fun colorForAltitude(altitudeMeters: Int?): Int {
+        if (altitudeMeters == null || altitudeMeters >= GREEN_CEILING_M) {
+            return Color.rgb(GREEN_R, GREEN_G, GREEN_B)
+        }
+        val t = (altitudeMeters.coerceAtLeast(0).toFloat() / GREEN_CEILING_M).coerceIn(0f, 1f)
+        return Color.rgb(
+            lerp(RED_R, GREEN_R, t),
+            lerp(RED_G, GREEN_G, t),
+            lerp(RED_B, GREEN_B, t),
+        )
+    }
+
+    private fun lerp(a: Int, b: Int, t: Float): Int =
+        (a + (b - a) * t).toInt().coerceIn(0, 255)
 
     private fun fillPaint(color: Int) = Paint().apply {
         this.color = color

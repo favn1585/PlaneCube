@@ -1,3 +1,4 @@
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -14,6 +15,18 @@ private fun localProperty(key: String): String {
     return props.getProperty(key).orEmpty()
 }
 
+// MUST stay in sync with Endpoints.OBFUSCATION_KEY in the Kotlin source.
+// This is obfuscation, not encryption: it only keeps the plaintext host out of
+// the APK string table and logs. A network capture can still reveal the domain.
+val OBFUSCATION_KEY = "pl4n3cub3-xrk-2026-aDsB"
+
+private fun obfuscate(value: String): String {
+    val key = OBFUSCATION_KEY.toByteArray(Charsets.UTF_8)
+    val data = value.toByteArray(Charsets.UTF_8)
+    val out = ByteArray(data.size) { i -> (data[i].toInt() xor key[i % key.size].toInt()).toByte() }
+    return Base64.getEncoder().encodeToString(out)
+}
+
 android {
     namespace = "com.plane.cube.network"
     compileSdk {
@@ -26,8 +39,11 @@ android {
         minSdk = 26
         consumerProguardFiles("consumer-rules.pro")
 
-        buildConfigField("String", "OPENSKY_CLIENT_ID", "\"${localProperty("OPENSKY_CLIENT_ID")}\"")
-        buildConfigField("String", "OPENSKY_CLIENT_SECRET", "\"${localProperty("OPENSKY_CLIENT_SECRET")}\"")
+        buildConfigField(
+            "String",
+            "ADSB_BASE_URL_ENC",
+            "\"${obfuscate(localProperty("ADSB_BASE_URL"))}\"",
+        )
     }
 
     buildFeatures {
