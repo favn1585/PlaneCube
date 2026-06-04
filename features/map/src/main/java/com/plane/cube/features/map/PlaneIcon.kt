@@ -26,11 +26,11 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory
  */
 internal object PlaneIcon {
 
-    private const val PLANE_DP = 40f
+    private const val PLANE_DP = 28f
     // Square area around the plane that contains it at any rotation. Needs
     // to be at least PLANE_DP * sqrt(2) ≈ 1.414 × PLANE_DP so the corners
     // don't get clipped when the icon is rotated 45°.
-    private const val PLANE_BOX_DP = 60f
+    private const val PLANE_BOX_DP = 42f
     private const val LABEL_DP = 14f
     private const val LABEL_GAP_DP = 2f
 
@@ -61,14 +61,17 @@ internal object PlaneIcon {
 
     private val sourcePath = PathParser.createPathFromPathData(SVG_PATH_DATA)
 
-    /** Color anchors for the altitude gradient (Material red 600 ↔ green 600). */
-    private const val RED_R = 0xE5
-    private const val RED_G = 0x39
-    private const val RED_B = 0x35
-    private const val GREEN_R = 0x34
-    private const val GREEN_G = 0xA8
-    private const val GREEN_B = 0x53
-    private const val GREEN_CEILING_M = 2000
+    /**
+     * Altitude → color ramp (piecewise linear in RGB):
+     *   ≥ 4000 m         → white
+     *   3000 m … 4000 m  → yellow → white
+     *   2000 m … 3000 m  → orange → yellow
+     *      0 m … 2000 m  → red → orange
+     */
+    private val WHITE = intArrayOf(0xFF, 0xFF, 0xFF)
+    private val YELLOW = intArrayOf(0xFF, 0xEB, 0x3B) // Material yellow 500
+    private val ORANGE = intArrayOf(0xFF, 0x98, 0x00) // Material orange 500
+    private val RED = intArrayOf(0xE5, 0x39, 0x35) // Material red 600
 
     /** Anchor for the produced bitmap so the plane's center lands on the point. */
     val anchorY: Float = (PLANE_BOX_DP / 2f) / (PLANE_BOX_DP + LABEL_GAP_DP + LABEL_DP)
@@ -92,7 +95,7 @@ internal object PlaneIcon {
 
         val fillColor = colorForAltitude(altitudeMeters)
         val borderColor = Color.BLACK
-        val borderDp = 2f
+        val borderDp = 1f
         val borderPx = borderDp * density
 
         // Plane sits centered in the upper square (planeBoxPx × planeBoxPx).
@@ -129,19 +132,33 @@ internal object PlaneIcon {
         return BitmapDescriptorFactory.fromBitmap(bitmap)
     }
 
-    /** Pure green at/above [GREEN_CEILING_M], linear RGB ramp toward red as
-     *  altitude drops to 0. Null altitude defaults to green. */
+    /**
+     * Piecewise color ramp by altitude. Boundary values use the "upper" color
+     * of the segment they fall into (e.g. exactly 4000 m → white).
+     * Null altitude defaults to white (treated as cruise/unknown).
+     */
     private fun colorForAltitude(altitudeMeters: Int?): Int {
-        if (altitudeMeters == null || altitudeMeters >= GREEN_CEILING_M) {
-            return Color.rgb(GREEN_R, GREEN_G, GREEN_B)
+        if (altitudeMeters == null) return rgb(WHITE)
+        val a = altitudeMeters
+        return when {
+            a >= 4000 -> rgb(WHITE)
+            a >= 3000 -> lerpColor(YELLOW, WHITE, (a - 3000f) / 1000f)
+            a >= 2000 -> lerpColor(ORANGE, YELLOW, (a - 2000f) / 1000f)
+            a >= 0 -> lerpColor(RED, ORANGE, a / 2000f)
+            else -> rgb(RED)
         }
-        val t = (altitudeMeters.coerceAtLeast(0).toFloat() / GREEN_CEILING_M).coerceIn(0f, 1f)
+    }
+
+    private fun lerpColor(from: IntArray, to: IntArray, tRaw: Float): Int {
+        val t = tRaw.coerceIn(0f, 1f)
         return Color.rgb(
-            lerp(RED_R, GREEN_R, t),
-            lerp(RED_G, GREEN_G, t),
-            lerp(RED_B, GREEN_B, t),
+            lerp(from[0], to[0], t),
+            lerp(from[1], to[1], t),
+            lerp(from[2], to[2], t),
         )
     }
+
+    private fun rgb(c: IntArray): Int = Color.rgb(c[0], c[1], c[2])
 
     private fun lerp(a: Int, b: Int, t: Float): Int =
         (a + (b - a) * t).toInt().coerceIn(0, 255)

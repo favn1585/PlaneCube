@@ -224,6 +224,9 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 uiSettings = MapUiSettings(
                     zoomControlsEnabled = false,
                     myLocationButtonEnabled = !state.edit.active,
+                    // Hide Google Maps' default "Navigate / Open in Maps"
+                    // toolbar that appears when a marker is selected.
+                    mapToolbarEnabled = false,
                 ),
                 contentPadding = PaddingValues(top = 56.dp),
             ) {
