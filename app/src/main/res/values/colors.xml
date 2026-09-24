@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
+    <!-- PlaneCube brand palette; mirrors ui/theme/Color.kt.
+         Blues are the exact stops of the launcher-icon background gradient
+         (drawable/ic_launcher_background.xml). -->
+    <color name="brand_cobalt">#FF003B97</color>       <!-- icon gradient start -->
+    <color name="brand_deep_cobalt">#FF002766</color>  <!-- icon gradient centre -->
+    <color name="brand_navy">#FF001740</color>         <!-- icon gradient end -->
+    <color name="brand_sky_blue">#FF3A78D6</color>
+    <color name="brand_red">#FFE5343B</color>
+    <color name="brand_coral">#FFFF6B6B</color>
+    <color name="brand_blush">#FFFFD6D6</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 </resources>

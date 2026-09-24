@@ -23,7 +23,6 @@ data class EditState(
     val firstCorner: GeoPoint? = null,
     val area: Area? = null,
     val maxAltitudeMeters: Float = DEFAULT_ALTITUDE_M,
-    val adjustingAltitude: Boolean = false,
     val saving: Boolean = false,
     @param:StringRes val errorMessage: Int? = null,
 ) {
@@ -50,7 +49,6 @@ sealed class MapUiIntent {
     data class TapFirstCorner(val point: GeoPoint) : MapUiIntent()
     data class CompleteArea(val area: Area) : MapUiIntent()
     data class DraftAltitudeChange(val meters: Float) : MapUiIntent()
-    data class DraftAltitudeAdjusting(val adjusting: Boolean) : MapUiIntent()
     /** Emitted by the screen when the camera has been idle for the debounce window. */
     data class UpdateVisibleArea(val area: Area) : MapUiIntent()
 }

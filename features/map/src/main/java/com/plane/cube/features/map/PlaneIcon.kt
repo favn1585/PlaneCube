@@ -11,13 +11,12 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory
 
 /**
  * Builds a marker bitmap for a plane: an SVG paper-airplane silhouette rotated
- * to heading, colored on a red↔green gradient by altitude, with the altitude
+ * to heading, colored along the brand red ramp by altitude, with the altitude
  * printed below in upright text.
  *
- * Coloring rule:
- *  - altitude unknown or ≥ 2000 m → fully green
- *  - 0 m → fully red
- *  - in between → linear RGB interpolation between red (0) and green (2000)
+ * Coloring rule: the lower an aircraft flies, the hotter it reads — brand red
+ * at ground level fading through coral and blush to white at cruise. Unknown
+ * altitudes are treated as cruise.
  * All planes get a 2 dp black border for contrast against satellite imagery.
  *
  * The plane sits in the upper portion of the bitmap, label hangs below.
@@ -62,16 +61,20 @@ internal object PlaneIcon {
     private val sourcePath = PathParser.createPathFromPathData(SVG_PATH_DATA)
 
     /**
-     * Altitude → color ramp (piecewise linear in RGB):
+     * Altitude → color ramp (piecewise linear in RGB), walking down the brand
+     * reds as aircraft climb away from the cube:
      *   ≥ 4000 m         → white
-     *   3000 m … 4000 m  → yellow → white
-     *   2000 m … 3000 m  → orange → yellow
-     *      0 m … 2000 m  → red → orange
+     *   3000 m … 4000 m  → blush → white
+     *   2000 m … 3000 m  → coral → blush
+     *      0 m … 2000 m  → red → coral
+     *
+     * These mirror the palette in the app theme, which this module cannot see;
+     * keep the two in step.
      */
     private val WHITE = intArrayOf(0xFF, 0xFF, 0xFF)
-    private val YELLOW = intArrayOf(0xFF, 0xEB, 0x3B) // Material yellow 500
-    private val ORANGE = intArrayOf(0xFF, 0x98, 0x00) // Material orange 500
-    private val RED = intArrayOf(0xE5, 0x39, 0x35) // Material red 600
+    private val BLUSH = intArrayOf(0xFF, 0xD6, 0xD6) // brand blush #FFD6D6
+    private val CORAL = intArrayOf(0xFF, 0x6B, 0x6B) // brand coral #FF6B6B
+    private val RED = intArrayOf(0xE5, 0x34, 0x3B) // brand red #E5343B
 
     /** Anchor for the produced bitmap so the plane's center lands on the point. */
     val anchorY: Float = (PLANE_BOX_DP / 2f) / (PLANE_BOX_DP + LABEL_GAP_DP + LABEL_DP)
@@ -142,9 +145,9 @@ internal object PlaneIcon {
         val a = altitudeMeters
         return when {
             a >= 4000 -> rgb(WHITE)
-            a >= 3000 -> lerpColor(YELLOW, WHITE, (a - 3000f) / 1000f)
-            a >= 2000 -> lerpColor(ORANGE, YELLOW, (a - 2000f) / 1000f)
-            a >= 0 -> lerpColor(RED, ORANGE, a / 2000f)
+            a >= 3000 -> lerpColor(BLUSH, WHITE, (a - 3000f) / 1000f)
+            a >= 2000 -> lerpColor(CORAL, BLUSH, (a - 2000f) / 1000f)
+            a >= 0 -> lerpColor(RED, CORAL, a / 2000f)
             else -> rgb(RED)
         }
     }

@@ -1,19 +1,11 @@
 <resources>
-    <!-- Top bar -->
-    <string name="map_title">PlaneCube</string>
-    <string name="map_title_edit">Select tracking area</string>
-    <string name="map_action_reset_corners">Reset corners</string>
-    <string name="map_action_cancel">Cancel</string>
-    <string name="map_action_reset_area">Reset tracking area</string>
-    <string name="map_action_edit_area">Edit area</string>
+    <!-- Map overlay buttons -->
+    <string name="map_action_settings">Tracking settings</string>
+    <string name="map_action_face_north">Face north</string>
+    <string name="map_action_my_location">My location</string>
 
     <!-- Plane markers -->
     <string name="map_marker_altitude">alt %1$d m</string>
-
-    <!-- Reset area dialog -->
-    <string name="map_reset_dialog_title">Reset tracking area?</string>
-    <string name="map_reset_dialog_body">Your saved area and altitude will be cleared. Background alerts will stop until you set a new area.</string>
-    <string name="map_reset_dialog_confirm">Reset</string>
 
     <!-- Location permission dialog -->
     <string name="map_permission_dialog_title">Location permission needed</string>
@@ -25,7 +17,8 @@
     <!-- Control sheet -->
     <string name="map_sheet_max_altitude">Max altitude</string>
     <string name="map_sheet_altitude_value">%1$d m</string>
-    <string name="map_sheet_save">Save</string>
+    <string name="map_sheet_clear">Clear</string>
+    <string name="map_sheet_set">Set</string>
     <string name="map_sheet_saving">Saving…</string>
     <string name="map_sheet_hint_pick_corners">Tap two opposite corners on the map to define a tracking area.</string>
 

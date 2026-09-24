@@ -7,25 +7,25 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,12 +35,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -67,14 +69,12 @@ import com.google.maps.android.compose.Polygon
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.plane.cube.domain.entity.Area
 import com.plane.cube.domain.entity.GeoPoint
-import kotlin.math.cos
-import kotlin.math.hypot
-import kotlin.math.sin
+import kotlinx.coroutines.launch
 
 private const val CAMERA_IDLE_DEBOUNCE_MS = 1_000L
-// Small clockwise nudge applied to the camera bearing while the altitude
-// slider is being dragged. Restored when the user releases the slider.
-private const val ALTITUDE_ADJUST_BEARING_DELTA = 25f
+private const val LOCATE_ZOOM = 12f
+// Enough room under the map for the overlay button row.
+private val OVERLAY_BUTTON_ROW_HEIGHT = 88.dp
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -98,7 +98,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     var permissionDismissed by remember { mutableStateOf(false) }
     val showPermissionDialog = !locationGranted && !permissionDismissed
 
-    var showResetDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(locationGranted) {
@@ -149,94 +149,26 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         viewModel.onIntent(MapUiIntent.UpdateVisibleArea(area))
     }
 
-    // Remember the bearing captured when the user first grabbed the slider, so
-    // the rotation applied during adjustment can be reversed cleanly on release.
-    var preAdjustBearing by remember { mutableStateOf<Float?>(null) }
-
-    LaunchedEffect(state.edit.adjustingAltitude, state.edit.area?.center) {
-        val area = state.edit.area
-        if (state.edit.adjustingAltitude && area != null) {
-            val baseBearing = preAdjustBearing
-                ?: cameraState.position.bearing.also { preAdjustBearing = it }
-            cameraState.animate(
-                update = CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder()
-                        .target(area.center.toLatLng())
-                        .zoom(cameraState.position.zoom)
-                        .bearing(baseBearing + ALTITUDE_ADJUST_BEARING_DELTA)
-                        .tilt(50f)
-                        .build(),
-                ),
-                durationMs = 700,
-            )
-        } else if (!state.edit.adjustingAltitude) {
-            val restoreBearing = preAdjustBearing
-            preAdjustBearing = null
-            if (restoreBearing != null || cameraState.position.tilt > 0.1f) {
-                cameraState.animate(
-                    update = CameraUpdateFactory.newCameraPosition(
-                        CameraPosition.Builder(cameraState.position)
-                            .tilt(0f)
-                            .bearing(restoreBearing ?: cameraState.position.bearing)
-                            .build(),
-                    ),
-                    durationMs = 500,
-                )
-            }
-        }
-    }
-
     val scaffoldState = rememberBottomSheetScaffoldState(
-        bottomSheetState = rememberFlightSheetState(state.edit.active),
+        bottomSheetState = rememberFlightSheetState(
+            editActive = state.edit.active,
+            onDismissed = { viewModel.onIntent(MapUiIntent.CancelEditing) },
+        ),
         snackbarHostState = snackbarHostState,
     )
 
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
-        // Collapsed to nothing outside edit mode, so the sheet is invisible
-        // until there is an altitude to pick.
-        sheetPeekHeight = if (state.edit.active) FlightSheetDefaults.PeekHeight else 0.dp,
+        // No peek state: a downward swipe should leave edit mode outright
+        // rather than parking the sheet half-open.
+        sheetPeekHeight = 0.dp,
         sheetContent = {
             FlightSheetContent(state = state.edit, onIntent = viewModel::onIntent)
         },
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        stringResource(
-                            if (state.edit.active) R.string.map_title_edit else R.string.map_title,
-                        ),
-                    )
-                },
-                actions = {
-                    if (state.edit.active) {
-                        IconButton(onClick = { viewModel.onIntent(MapUiIntent.ResetDraftCorners) }) {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = stringResource(R.string.map_action_reset_corners),
-                            )
-                        }
-                        IconButton(onClick = { viewModel.onIntent(MapUiIntent.CancelEditing) }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = stringResource(R.string.map_action_cancel),
-                            )
-                        }
-                    } else if (state.preferences != null) {
-                        IconButton(onClick = { showResetDialog = true }) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = stringResource(R.string.map_action_reset_area),
-                            )
-                        }
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        // Only the top bar inset is applied: letting the sheet's peek height
-        // resize the map would shift the camera every time it opens or closes.
-        Box(modifier = Modifier.padding(top = padding.calculateTopPadding()).fillMaxSize()) {
+    ) { _ ->
+        // No top bar: the map runs edge to edge and the overlay buttons carry
+        // their own system-bar insets.
+        Box(modifier = Modifier.fillMaxSize()) {
             GoogleMap(
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraState,
@@ -256,12 +188,19 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 ),
                 uiSettings = MapUiSettings(
                     zoomControlsEnabled = false,
-                    myLocationButtonEnabled = !state.edit.active,
+                    // Google's own compass and location button are fixed to the
+                    // top corners, so they are replaced by the overlay buttons
+                    // below, which can sit where they are wanted.
+                    compassEnabled = false,
+                    myLocationButtonEnabled = false,
                     // Hide Google Maps' default "Navigate / Open in Maps"
                     // toolbar that appears when a marker is selected.
                     mapToolbarEnabled = false,
                 ),
-                contentPadding = PaddingValues(top = 56.dp),
+                // Lifts Google's logo and attribution clear of the button row;
+                // they must stay visible, and setPadding is the sanctioned way
+                // to move them.
+                contentPadding = PaddingValues(bottom = OVERLAY_BUTTON_ROW_HEIGHT),
             ) {
                 if (state.edit.active) {
                     state.edit.area?.let { AreaPolygon(it) }
@@ -304,18 +243,53 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                FloatingActionButton(
+                // Hidden while the sheet is up, since it covers the bottom of
+                // the screen and the settings button would only reopen what is
+                // already open.
+                MapOverlayButton(
                     onClick = { viewModel.onIntent(MapUiIntent.StartEditing) },
+                    icon = Icons.Default.Settings,
+                    contentDescription = stringResource(R.string.map_action_settings),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .statusBarsPadding()
+                        .padding(16.dp),
+                )
+                CompassButton(
+                    cameraState = cameraState,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .navigationBarsPadding()
+                        .padding(16.dp),
+                )
+                MapOverlayButton(
+                    onClick = {
+                        val location = state.userLocation
+                        when {
+                            location != null -> scope.launch {
+                                cameraState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(
+                                        location.toLatLng(),
+                                        LOCATE_ZOOM,
+                                    ),
+                                    durationMs = 600,
+                                )
+                            }
+                            // No fix yet: ask for a fresh one. Guarded on the
+                            // permission, because this intent also flips
+                            // isMyLocationEnabled, which throws without it.
+                            state.hasLocationPermission ->
+                                viewModel.onIntent(MapUiIntent.PermissionGranted)
+                        }
+                    },
+                    icon = Icons.Default.MyLocation,
+                    contentDescription = stringResource(R.string.map_action_my_location),
+                    small = false,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .navigationBarsPadding()
                         .padding(16.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = stringResource(R.string.map_action_edit_area),
-                    )
-                }
+                )
             }
         }
     }
@@ -331,36 +305,73 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
             onDismiss = { permissionDismissed = true },
         )
     }
+}
 
-    if (showResetDialog) {
-        ResetAreaDialog(
-            onConfirm = {
-                viewModel.onIntent(MapUiIntent.ClearPreferences)
-                showResetDialog = false
-            },
-            onDismiss = { showResetDialog = false },
+/**
+ * Round map control: brand blue with a white glyph in both themes, so it reads
+ * the same over dark satellite imagery and bright terrain.
+ */
+@Composable
+private fun MapOverlayButton(
+    onClick: () -> Unit,
+    icon: ImageVector,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    small: Boolean = true,
+    iconModifier: Modifier = Modifier,
+) {
+    val containerColor = MaterialTheme.colorScheme.primary
+    val content: @Composable () -> Unit = {
+        Icon(icon, contentDescription = contentDescription, modifier = iconModifier)
+    }
+    if (small) {
+        SmallFloatingActionButton(
+            onClick = onClick,
+            shape = CircleShape,
+            containerColor = containerColor,
+            contentColor = Color.White,
+            modifier = modifier,
+            content = content,
+        )
+    } else {
+        FloatingActionButton(
+            onClick = onClick,
+            shape = CircleShape,
+            containerColor = containerColor,
+            contentColor = Color.White,
+            modifier = modifier,
+            content = content,
         )
     }
 }
 
+/** Resets the map to north-up. Doubles as a compass: the needle tracks the camera. */
 @Composable
-private fun ResetAreaDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
-        title = { Text(stringResource(R.string.map_reset_dialog_title)) },
-        text = {
-            Text(
-                stringResource(R.string.map_reset_dialog_body),
-                style = MaterialTheme.typography.bodyMedium,
-            )
+private fun CompassButton(
+    cameraState: CameraPositionState,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    MapOverlayButton(
+        onClick = {
+            scope.launch {
+                cameraState.animate(
+                    update = CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder(cameraState.position)
+                            .bearing(0f)
+                            .tilt(0f)
+                            .build(),
+                    ),
+                    durationMs = 400,
+                )
+            }
         },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text(stringResource(R.string.map_reset_dialog_confirm)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.map_action_cancel)) }
-        },
+        icon = Icons.Default.Explore,
+        contentDescription = stringResource(R.string.map_action_face_north),
+        modifier = modifier,
+        // Read here rather than in MapScreen so a camera rotation recomposes
+        // the needle alone.
+        iconModifier = Modifier.rotate(-cameraState.position.bearing),
     )
 }
 
@@ -401,8 +412,8 @@ private fun EditOverlay(
     cameraState: CameraPositionState,
     modifier: Modifier = Modifier,
 ) {
-    // Subscribe to camera changes so we repaint on pan / zoom / tilt.
-    val position = cameraState.position
+    // Read the camera so a pan or zoom repaints the markers.
+    cameraState.position
     val projection = cameraState.projection ?: return
 
     val area = editState.area
@@ -418,71 +429,13 @@ private fun EditOverlay(
         else -> emptyList()
     }
 
-    val boxScreen: Pair<List<Offset>, List<Offset>>? = if (area != null) {
-        val ground = cornerScreens
-        // Local pixels-per-meter at the area centre, sampled along the axis
-        // perpendicular to the current camera bearing (i.e. the screen's
-        // horizontal axis on the ground plane). That axis is the only one
-        // unaffected by tilt foreshortening, and using it keeps the scale
-        // stable as the user rotates the map.
-        val centerLat = area.center.latitude
-        val centerLng = area.center.longitude
-        val centerLatRad = Math.toRadians(centerLat)
-        val perpBearingRad = Math.toRadians(position.bearing.toDouble() + 90.0)
-        val sampleMeters = 100.0
-        val dLat = (sampleMeters / 111_000.0) * cos(perpBearingRad)
-        val dLng = (sampleMeters / (111_000.0 * cos(centerLatRad))) * sin(perpBearingRad)
-        val c = projection.toScreenLocation(LatLng(centerLat, centerLng))
-        val e = projection.toScreenLocation(LatLng(centerLat + dLat, centerLng + dLng))
-        val pixelsPerMeter = (hypot((e.x - c.x).toFloat(), (e.y - c.y).toFloat()) /
-                sampleMeters.toFloat()).coerceAtLeast(0f)
-        val tiltRadians = Math.toRadians(position.tilt.toDouble()).toFloat()
-        val dy = editState.maxAltitudeMeters * pixelsPerMeter * sin(tiltRadians)
-        ground to ground.map { Offset(it.x, it.y - dy) }
-    } else null
+    val markerColor = MaterialTheme.colorScheme.tertiary
 
+    // Fixed-pixel corner markers (do not zoom with the map).
     Canvas(modifier = modifier) {
-        val fillColor = Color(0x3322AA77)
-        val strokeColor = Color(0xCC22AA77)
-        val strokeWidth = 2.dp.toPx()
-
-        boxScreen?.let { (ground, top) ->
-            // 4 side faces.
-            for (i in 0 until 4) {
-                val next = (i + 1) % 4
-                val side = Path().apply {
-                    moveTo(ground[i].x, ground[i].y)
-                    lineTo(ground[next].x, ground[next].y)
-                    lineTo(top[next].x, top[next].y)
-                    lineTo(top[i].x, top[i].y)
-                    close()
-                }
-                drawPath(side, fillColor)
-                drawPath(side, strokeColor, style = Stroke(width = strokeWidth))
-            }
-            // Top face.
-            val topPath = Path().apply {
-                moveTo(top[0].x, top[0].y)
-                for (i in 1 until 4) lineTo(top[i].x, top[i].y)
-                close()
-            }
-            drawPath(topPath, fillColor)
-            drawPath(topPath, strokeColor, style = Stroke(width = strokeWidth))
-            // Vertical edges for emphasis.
-            for (i in 0 until 4) {
-                drawLine(
-                    color = strokeColor,
-                    start = ground[i],
-                    end = top[i],
-                    strokeWidth = strokeWidth,
-                )
-            }
-        }
-
-        // Fixed-pixel corner markers (do not zoom with the map).
-        val cornerFill = Color(0xFF22AA77)
-        val cornerHalo = Color(0x5522AA77)
-        val cornerStroke = Color(0xFFFFFFFF)
+        val cornerFill = markerColor
+        val cornerHalo = markerColor.copy(alpha = 0.33f)
+        val cornerStroke = Color.White
         val cornerStrokeWidth = 2.dp.toPx()
         val coreRadius = 6.dp.toPx()
         val haloRadius = 14.dp.toPx()
@@ -496,10 +449,11 @@ private fun EditOverlay(
 
 @Composable
 private fun AreaPolygon(area: Area) {
+    val color = MaterialTheme.colorScheme.tertiary
     Polygon(
         points = area.corners.map { it.toLatLng() },
-        fillColor = Color(0x3322AA77),
-        strokeColor = Color(0xFF22AA77),
+        fillColor = color.copy(alpha = 0.2f),
+        strokeColor = color,
         strokeWidth = 4f,
     )
 }
@@ -568,8 +522,3 @@ private fun PermissionDialogDeniedPreview() {
     PermissionDialog(rationale = true, onRequest = {}, onDismiss = {})
 }
 
-@Preview(showBackground = true, name = "Reset dialog")
-@Composable
-private fun ResetAreaDialogPreview() {
-    ResetAreaDialog(onConfirm = {}, onDismiss = {})
-}

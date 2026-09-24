@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Reusable diagonal blue gradient background. Matches the launcher-icon
+    background (drawable/ic_launcher_background.xml): top-left → bottom-right,
+    bright cobalt → deep navy, three stops.
+
+    Applied via `android:background="@drawable/bg_gradient"` on any View, or
+    inside a Compose Modifier as `background(painterResource(id = R.drawable.bg_gradient))`.
+    Scales to any size (unlike the 108dp vector-based icon background).
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:type="linear"
+        android:angle="315"
+        android:startColor="#003B97"
+        android:centerColor="#002766"
+        android:endColor="#001740" />
+</shape>

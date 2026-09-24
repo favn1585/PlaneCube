@@ -61,9 +61,6 @@ class MapViewModel @Inject constructor(
             is MapUiIntent.DraftAltitudeChange -> _viewState.update {
                 it.copy(edit = it.edit.copy(maxAltitudeMeters = intent.meters))
             }
-            is MapUiIntent.DraftAltitudeAdjusting -> _viewState.update {
-                it.copy(edit = it.edit.copy(adjustingAltitude = intent.adjusting))
-            }
             is MapUiIntent.UpdateVisibleArea -> updateVisibleArea(intent.area)
         }
     }

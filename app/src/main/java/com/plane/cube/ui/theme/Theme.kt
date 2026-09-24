@@ -1,58 +1,70 @@
 package com.plane.cube.ui.theme
 
-import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 
+// Both schemes share the same primary — the launcher icon's cobalt gradient
+// start — so the FAB / action buttons / accented text always feel like a piece
+// of the icon. Only the neutrals shift with light/dark mode.
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+    primary = BrandCobalt,
+    onPrimary = Color.White,
+    primaryContainer = BrandDeepCobalt,
+    onPrimaryContainer = Color.White,
+    secondary = BrandSkyBlue,
+    onSecondary = Color.White,
+    // Tracking cube + closest-aircraft accents.
+    tertiary = BrandCoral,
+    onTertiary = BrandNavy,
+    tertiaryContainer = BrandRed,
+    onTertiaryContainer = Color.White,
+    background = BrandNavy,
+    onBackground = Color.White,
+    surface = BrandNavy,
+    onSurface = Color.White,
+    surfaceVariant = BrandDeepCobalt,
+    onSurfaceVariant = BrandBlush,
+    error = BrandCoral,
+    onError = BrandNavy,
+    errorContainer = BrandRed,
+    onErrorContainer = Color.White,
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
+    primary = BrandCobalt,
     onPrimary = Color.White,
+    primaryContainer = BrandSkyBlue,
+    onPrimaryContainer = Color.White,
+    secondary = BrandSkyBlue,
     onSecondary = Color.White,
+    tertiary = BrandRed,
     onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
+    tertiaryContainer = BrandBlush,
+    onTertiaryContainer = BrandNavy,
+    background = Color.White,
+    onBackground = BrandNavy,
+    surface = Color.White,
+    onSurface = BrandNavy,
+    surfaceVariant = Color(0xFFE6ECF7),
+    onSurfaceVariant = BrandNavy,
+    error = BrandRed,
+    onError = Color.White,
+    errorContainer = BrandBlush,
+    onErrorContainer = BrandNavy,
 )
 
 @Composable
 fun PlaneCubeTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
-    content: @Composable () -> Unit
+    content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
-
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
         typography = Typography,
-        content = content
+        content = content,
     )
 }

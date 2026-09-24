@@ -25,6 +25,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -33,6 +36,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.plane.cube.domain.entity.Area
 import com.plane.cube.domain.entity.GeoPoint
+import kotlinx.coroutines.flow.dropWhile
+import kotlinx.coroutines.flow.filter
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -47,16 +52,6 @@ private const val ALTITUDE_SNAP_TOLERANCE_M = 40f
 private fun snapAltitude(meters: Float): Float {
     val nearest = (meters / EditState.ALTITUDE_STEP_M).roundToInt() * EditState.ALTITUDE_STEP_M
     return if (abs(meters - nearest) <= ALTITUDE_SNAP_TOLERANCE_M) nearest else meters
-}
-
-/** Tuning values shared between the sheet content and the scaffold hosting it. */
-internal object FlightSheetDefaults {
-    /**
-     * Height left visible when the user drags the sheet down: enough for the
-     * drag handle plus the altitude read-out, so the map stays usable while the
-     * current value remains in sight.
-     */
-    val PeekHeight = 96.dp
 }
 
 /**
@@ -97,9 +92,7 @@ internal fun FlightSheetContent(
             track = { sliderState -> AltitudeTrack(sliderState) },
             onValueChange = { meters ->
                 onIntent(MapUiIntent.DraftAltitudeChange(snapAltitude(meters)))
-                if (!state.adjustingAltitude) onIntent(MapUiIntent.DraftAltitudeAdjusting(true))
             },
-            onValueChangeFinished = { onIntent(MapUiIntent.DraftAltitudeAdjusting(false)) },
             valueRange = EditState.MIN_ALTITUDE_M..EditState.MAX_ALTITUDE_M,
         )
         state.errorMessage?.let {
@@ -111,16 +104,20 @@ internal fun FlightSheetContent(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
         ) {
             OutlinedButton(
-                enabled = !state.saving,
-                onClick = { onIntent(MapUiIntent.CancelEditing) },
-            ) { Text(stringResource(R.string.map_action_cancel)) }
+                enabled = state.area != null && !state.saving,
+                onClick = {
+                    onIntent(MapUiIntent.ClearPreferences)
+                    // Leaving edit mode drops the draft and closes the sheet.
+                    onIntent(MapUiIntent.CancelEditing)
+                },
+            ) { Text(stringResource(R.string.map_sheet_clear)) }
             Button(
                 enabled = state.canSave && !state.saving,
                 onClick = { onIntent(MapUiIntent.SaveDraft) },
             ) {
                 Text(
                     stringResource(
-                        if (state.saving) R.string.map_sheet_saving else R.string.map_sheet_save,
+                        if (state.saving) R.string.map_sheet_saving else R.string.map_sheet_set,
                     ),
                 )
             }
@@ -173,13 +170,31 @@ private fun AltitudeTrack(sliderState: SliderState) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun rememberFlightSheetState(editActive: Boolean): SheetState {
+internal fun rememberFlightSheetState(
+    editActive: Boolean,
+    onDismissed: () -> Unit,
+): SheetState {
     val sheetState = rememberStandardBottomSheetState(
         initialValue = if (editActive) SheetValue.Expanded else SheetValue.Hidden,
         skipHiddenState = false,
     )
+    val currentOnDismissed by rememberUpdatedState(onDismissed)
     LaunchedEffect(editActive) {
-        if (editActive) sheetState.expand() else sheetState.hide()
+        if (!editActive) {
+            sheetState.hide()
+            return@LaunchedEffect
+        }
+        sheetState.expand()
+        // Putting the sheet away is a way out of edit mode, so report it. Any
+        // settled state other than Expanded counts: with no peek height the
+        // Hidden and PartiallyExpanded anchors sit at the same offset, so a
+        // swipe-away can land on either and both leave the sheet off screen.
+        // dropWhile guards the start-up window — the sheet reads as Hidden
+        // until the expand settles, and that is not the user dismissing it.
+        snapshotFlow { sheetState.currentValue }
+            .dropWhile { it != SheetValue.Expanded }
+            .filter { it != SheetValue.Expanded }
+            .collect { currentOnDismissed() }
     }
     return sheetState
 }
