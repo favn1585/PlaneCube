@@ -80,6 +80,9 @@ import kotlin.math.hypot
 import kotlin.math.sin
 
 private const val CAMERA_IDLE_DEBOUNCE_MS = 1_000L
+// Small clockwise nudge applied to the camera bearing while the altitude
+// slider is being dragged. Restored when the user releases the slider.
+private const val ALTITUDE_ADJUST_BEARING_DELTA = 25f
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -150,27 +153,40 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         viewModel.onIntent(MapUiIntent.UpdateVisibleArea(area))
     }
 
+    // Remember the bearing captured when the user first grabbed the slider, so
+    // the rotation applied during adjustment can be reversed cleanly on release.
+    var preAdjustBearing by remember { mutableStateOf<Float?>(null) }
+
     LaunchedEffect(state.edit.adjustingAltitude, state.edit.area?.center) {
         val area = state.edit.area
         if (state.edit.adjustingAltitude && area != null) {
+            val baseBearing = preAdjustBearing
+                ?: cameraState.position.bearing.also { preAdjustBearing = it }
             cameraState.animate(
                 update = CameraUpdateFactory.newCameraPosition(
                     CameraPosition.Builder()
                         .target(area.center.toLatLng())
                         .zoom(cameraState.position.zoom)
-                        .bearing(cameraState.position.bearing)
+                        .bearing(baseBearing + ALTITUDE_ADJUST_BEARING_DELTA)
                         .tilt(50f)
                         .build(),
                 ),
                 durationMs = 700,
             )
-        } else if (!state.edit.adjustingAltitude && cameraState.position.tilt > 0.1f) {
-            cameraState.animate(
-                update = CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder(cameraState.position).tilt(0f).build(),
-                ),
-                durationMs = 500,
-            )
+        } else if (!state.edit.adjustingAltitude) {
+            val restoreBearing = preAdjustBearing
+            preAdjustBearing = null
+            if (restoreBearing != null || cameraState.position.tilt > 0.1f) {
+                cameraState.animate(
+                    update = CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder(cameraState.position)
+                            .tilt(0f)
+                            .bearing(restoreBearing ?: cameraState.position.bearing)
+                            .build(),
+                    ),
+                    durationMs = 500,
+                )
+            }
         }
     }
 
