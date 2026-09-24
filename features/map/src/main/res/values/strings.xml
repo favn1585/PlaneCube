@@ -1,0 +1,36 @@
+<resources>
+    <!-- Top bar -->
+    <string name="map_title">PlaneCube</string>
+    <string name="map_title_edit">Select tracking area</string>
+    <string name="map_action_reset_corners">Reset corners</string>
+    <string name="map_action_cancel">Cancel</string>
+    <string name="map_action_reset_area">Reset tracking area</string>
+    <string name="map_action_edit_area">Edit area</string>
+
+    <!-- Plane markers -->
+    <string name="map_marker_altitude">alt %1$d m</string>
+
+    <!-- Reset area dialog -->
+    <string name="map_reset_dialog_title">Reset tracking area?</string>
+    <string name="map_reset_dialog_body">Your saved area and altitude will be cleared. Background alerts will stop until you set a new area.</string>
+    <string name="map_reset_dialog_confirm">Reset</string>
+
+    <!-- Location permission dialog -->
+    <string name="map_permission_dialog_title">Location permission needed</string>
+    <string name="map_permission_dialog_body">PlaneCube needs your location to show planes near you.</string>
+    <string name="map_permission_dialog_body_denied">Permission was denied. Grant it from system settings to track planes near you.</string>
+    <string name="map_permission_dialog_grant">Grant</string>
+    <string name="map_permission_dialog_dismiss">Not now</string>
+
+    <!-- Control sheet -->
+    <string name="map_sheet_max_altitude">Max altitude</string>
+    <string name="map_sheet_altitude_value">%1$d m</string>
+    <string name="map_sheet_save">Save</string>
+    <string name="map_sheet_saving">Saving…</string>
+    <string name="map_sheet_hint_pick_corners">Tap two opposite corners on the map to define a tracking area.</string>
+
+    <!-- Errors -->
+    <string name="map_error_location_unavailable">Couldn\'t get your location. Enable location services and try again.</string>
+    <string name="map_error_plane_fetch">Couldn\'t load planes. Check your connection and try again.</string>
+    <string name="map_error_save_failed">Couldn\'t save your tracking area. Try again.</string>
+</resources>

@@ -1,5 +1,6 @@
 package com.plane.cube.features.map
 
+import androidx.annotation.StringRes
 import com.plane.cube.domain.entity.Area
 import com.plane.cube.domain.entity.GeoPoint
 import com.plane.cube.domain.entity.Plane
@@ -11,7 +12,7 @@ data class MapViewState(
     val preferences: TrackingPreferences? = null,
     val planes: List<Plane> = emptyList(),
     val isRefreshing: Boolean = false,
-    val errorMessage: String? = null,
+    @param:StringRes val errorMessage: Int? = null,
     val edit: EditState = EditState(),
     /** The lat/lng bbox the user is currently looking at on the map. */
     val visibleArea: Area? = null,
@@ -24,7 +25,7 @@ data class EditState(
     val maxAltitudeMeters: Float = DEFAULT_ALTITUDE_M,
     val adjustingAltitude: Boolean = false,
     val saving: Boolean = false,
-    val errorMessage: String? = null,
+    @param:StringRes val errorMessage: Int? = null,
 ) {
     val canSave: Boolean get() = area != null
 
@@ -32,6 +33,9 @@ data class EditState(
         const val MIN_ALTITUDE_M = 0f
         const val MAX_ALTITUDE_M = 2000f
         const val DEFAULT_ALTITUDE_M = 500f
+
+        /** Spacing of the altitude slider's detents. */
+        const val ALTITUDE_STEP_M = 500f
     }
 }
 

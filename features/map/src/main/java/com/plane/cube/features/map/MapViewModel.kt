@@ -87,7 +87,7 @@ class MapViewModel @Inject constructor(
             _viewState.update { it.copy(userLocation = location) }
             if (location == null) {
                 _viewState.update {
-                    it.copy(errorMessage = "Couldn't get your location. Enable location services and try again.")
+                    it.copy(errorMessage = R.string.map_error_location_unavailable)
                 }
             }
             maybeRestartTicker()
@@ -133,9 +133,13 @@ class MapViewModel @Inject constructor(
             }
                 .onSuccess { _viewState.update { it.copy(edit = EditState()) } }
                 .onFailure { error ->
+                    Log.w(TAG, "Saving tracking preferences failed", error)
                     _viewState.update {
                         it.copy(
-                            edit = it.edit.copy(saving = false, errorMessage = error.message),
+                            edit = it.edit.copy(
+                                saving = false,
+                                errorMessage = R.string.map_error_save_failed,
+                            ),
                         )
                     }
                 }
@@ -232,7 +236,7 @@ class MapViewModel @Inject constructor(
             _viewState.update {
                 it.copy(
                     isRefreshing = false,
-                    errorMessage = "Plane fetch failed: ${error.message ?: error::class.simpleName}",
+                    errorMessage = R.string.map_error_plane_fetch,
                 )
             }
         }
