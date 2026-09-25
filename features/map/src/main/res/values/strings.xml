@@ -17,6 +17,9 @@
     <!-- Control sheet -->
     <string name="map_sheet_max_altitude">Max altitude</string>
     <string name="map_sheet_altitude_value">%1$d m</string>
+    <string name="map_sheet_warning_distance">Warning distance</string>
+    <string name="map_sheet_distance_value">%1$.1f km</string>
+    <string name="map_sheet_warning_distance_hint">Planes turn red as they get this close to the area or its altitude ceiling.</string>
     <string name="map_sheet_clear">Clear</string>
     <string name="map_sheet_set">Set</string>
     <string name="map_sheet_saving">Saving…</string>

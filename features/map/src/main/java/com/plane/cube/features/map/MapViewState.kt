@@ -22,6 +22,7 @@ data class EditState(
     val firstCorner: GeoPoint? = null,
     val area: Area? = null,
     val maxAltitudeMeters: Float = DEFAULT_ALTITUDE_M,
+    val warningDistanceMeters: Float = DEFAULT_WARNING_DISTANCE_M,
     val saving: Boolean = false,
     @param:StringRes val errorMessage: Int? = null,
 ) {
@@ -34,6 +35,12 @@ data class EditState(
 
         /** Spacing of the altitude slider's detents. */
         const val ALTITUDE_STEP_M = 500f
+
+        const val MIN_WARNING_DISTANCE_M = 500f
+        const val MAX_WARNING_DISTANCE_M = 5_000f
+        const val WARNING_DISTANCE_STEP_M = 500f
+        val DEFAULT_WARNING_DISTANCE_M =
+            TrackingPreferences.DEFAULT_WARNING_DISTANCE_M.toFloat()
     }
 }
 
@@ -48,8 +55,11 @@ sealed class MapUiIntent {
     data class TapFirstCorner(val point: GeoPoint) : MapUiIntent()
     data class CompleteArea(val area: Area) : MapUiIntent()
     data class DraftAltitudeChange(val meters: Float) : MapUiIntent()
+    data class DraftWarningDistanceChange(val meters: Float) : MapUiIntent()
     /** Emitted by the screen when the camera has been idle for the debounce window. */
     data class UpdateVisibleArea(val area: Area) : MapUiIntent()
     /** The user started or stopped panning/zooming/rotating the map. */
     data class CameraMovingChanged(val moving: Boolean) : MapUiIntent()
+    /** The map screen started (true) or stopped (false) being visible. */
+    data class ScreenVisibleChanged(val visible: Boolean) : MapUiIntent()
 }

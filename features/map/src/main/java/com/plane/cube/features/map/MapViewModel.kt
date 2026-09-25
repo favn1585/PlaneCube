@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlin.coroutines.cancellation.CancellationException
+import com.plane.cube.domain.PlaneAlerts
 import com.plane.cube.domain.TrackingScheduler
 import com.plane.cube.domain.entity.Area
 import com.plane.cube.domain.entity.GeoPoint
@@ -27,6 +28,7 @@ class MapViewModel @Inject constructor(
     private val trackingRepository: TrackingPreferencesRepository,
     private val locationProvider: LocationProvider,
     private val scheduler: TrackingScheduler,
+    private val planeAlerts: PlaneAlerts,
 ) : ViewModel() {
 
     private val _viewState = MutableStateFlow(MapViewState())
@@ -41,10 +43,16 @@ class MapViewModel @Inject constructor(
      */
     private var cameraMoving = false
 
+    /** False while the app is in the background; the ticker is paused then. */
+    private var screenVisible = true
+
     init {
         viewModelScope.launch {
             trackingRepository.observePreferences().collectLatest { preferences ->
                 _viewState.update { it.copy(preferences = preferences) }
+                // Opening the app is the reliable moment to (re)start background
+                // monitoring: Android won't let it start from the background.
+                if (preferences != null) scheduler.schedule()
                 maybeRestartTicker()
             }
         }
@@ -70,8 +78,12 @@ class MapViewModel @Inject constructor(
             is MapUiIntent.DraftAltitudeChange -> _viewState.update {
                 it.copy(edit = it.edit.copy(maxAltitudeMeters = intent.meters))
             }
+            is MapUiIntent.DraftWarningDistanceChange -> _viewState.update {
+                it.copy(edit = it.edit.copy(warningDistanceMeters = intent.meters))
+            }
             is MapUiIntent.UpdateVisibleArea -> updateVisibleArea(intent.area)
             is MapUiIntent.CameraMovingChanged -> cameraMoving = intent.moving
+            is MapUiIntent.ScreenVisibleChanged -> onScreenVisibleChanged(intent.visible)
         }
     }
 
@@ -110,6 +122,7 @@ class MapViewModel @Inject constructor(
                     firstCorner = null,
                     area = seed.area,
                     maxAltitudeMeters = seed.maxAltitudeMeters.toFloat(),
+                    warningDistanceMeters = seed.warningDistanceMeters.toFloat(),
                 )
             } else {
                 EditState(active = true)
@@ -133,6 +146,7 @@ class MapViewModel @Inject constructor(
                     TrackingPreferences(
                         area = area,
                         maxAltitudeMeters = _viewState.value.edit.maxAltitudeMeters.toDouble(),
+                        warningDistanceMeters = _viewState.value.edit.warningDistanceMeters.toDouble(),
                     ),
                 )
                 scheduler.schedule()
@@ -186,7 +200,19 @@ class MapViewModel @Inject constructor(
         return state.visibleArea?.let { PlaneQuery(it.center, it.radiusNm) }
     }
 
+    private fun onScreenVisibleChanged(visible: Boolean) {
+        screenVisible = visible
+        if (visible) {
+            maybeRestartTicker()
+        } else {
+            // Keep the last planes on screen so returning doesn't flash an
+            // empty map; the restarted ticker refreshes them immediately.
+            tickerJob?.cancel()
+        }
+    }
+
     private fun maybeRestartTicker() {
+        if (!screenVisible) return
         val state = _viewState.value
         if (state.edit.active) {
             Log.d(TAG, "Ticker stopped: edit mode active")
@@ -254,6 +280,8 @@ class MapViewModel @Inject constructor(
             _viewState.update { it.copy(errorMessage = R.string.map_error_plane_fetch) }
             return
         }
+        // Alerts don't wait for the camera to settle.
+        _viewState.value.preferences?.let { planeAlerts.onPlanesUpdated(it, fetched) }
         // A gesture started while the request was in flight: drop the result
         // rather than redraw markers under the user's finger. The next tick
         // after the camera settles will fetch fresh data.

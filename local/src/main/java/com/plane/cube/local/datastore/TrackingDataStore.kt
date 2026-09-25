@@ -20,6 +20,8 @@ object TrackingKeys {
     val Corner3Lat = doublePreferencesKey("corner3_lat")
     val Corner3Lng = doublePreferencesKey("corner3_lng")
     val MaxAltitude = doublePreferencesKey("max_altitude")
+    /** Optional: areas saved before this setting existed fall back to the default. */
+    val WarningDistance = doublePreferencesKey("warning_distance")
 }
 
 internal fun Preferences.hasArea(): Boolean =

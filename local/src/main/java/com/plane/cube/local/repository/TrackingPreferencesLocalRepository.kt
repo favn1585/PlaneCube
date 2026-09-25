@@ -31,6 +31,8 @@ class TrackingPreferencesLocalRepository @Inject constructor(
             TrackingPreferences(
                 area = Area(corners),
                 maxAltitudeMeters = prefs[TrackingKeys.MaxAltitude]!!,
+                warningDistanceMeters = prefs[TrackingKeys.WarningDistance]
+                    ?: TrackingPreferences.DEFAULT_WARNING_DISTANCE_M,
             )
         }
 
@@ -46,6 +48,7 @@ class TrackingPreferencesLocalRepository @Inject constructor(
             prefs[TrackingKeys.Corner3Lat] = c[3].latitude
             prefs[TrackingKeys.Corner3Lng] = c[3].longitude
             prefs[TrackingKeys.MaxAltitude] = preferences.maxAltitudeMeters
+            prefs[TrackingKeys.WarningDistance] = preferences.warningDistanceMeters
         }
     }
 

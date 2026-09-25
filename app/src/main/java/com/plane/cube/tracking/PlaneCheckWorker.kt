@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.plane.cube.domain.PlaneAlerts
 import com.plane.cube.domain.repository.PlaneRepository
 import com.plane.cube.domain.repository.TrackingPreferencesRepository
 import dagger.assisted.Assisted
@@ -16,23 +17,17 @@ class PlaneCheckWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val planeRepository: PlaneRepository,
     private val trackingRepository: TrackingPreferencesRepository,
-    private val notifier: PlaneNotifier,
+    private val planeAlerts: PlaneAlerts,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
         val preferences = trackingRepository.observePreferences().first() ?: return Result.success()
         return runCatching {
-            // The feed is queried by radius, so the result also covers the
-            // circle around the area; do the exact in-polygon + altitude check.
+            // Shares PlaneAlerts with the foreground monitor, so a plane that
+            // one of them already announced isn't announced twice.
             val area = preferences.area
             val planes = planeRepository.fetchPlanes(area.center, area.radiusNm)
-            val inCube = planes.filter { plane ->
-                val altitude = plane.altitudeMeters
-                altitude != null &&
-                    altitude <= preferences.maxAltitudeMeters &&
-                    preferences.area.contains(plane.position)
-            }
-            if (inCube.isNotEmpty()) notifier.notifyPlanes(inCube)
+            planeAlerts.onPlanesUpdated(preferences, planes)
             Result.success()
         }.getOrElse { Result.retry() }
     }

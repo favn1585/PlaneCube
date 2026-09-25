@@ -5,166 +5,110 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
-import androidx.core.graphics.PathParser
 import com.google.android.gms.maps.model.BitmapDescriptor
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import kotlin.math.ceil
+import kotlin.math.hypot
+
+/** A rendered marker bitmap plus the anchor that puts the plane's center on its position. */
+internal class PlaneMarkerIcon(val descriptor: BitmapDescriptor, val anchorY: Float)
 
 /**
- * Builds a marker bitmap for a plane: an SVG paper-airplane silhouette rotated
- * to heading, colored along the brand red ramp by altitude, with the altitude
- * printed below in upright text.
+ * Builds a marker bitmap for a plane: its tar1090 type silhouette (see
+ * [AircraftIcons]) rotated to heading and filled with the color picked by
+ * [PlaneColors], with the altitude printed below in upright text.
+ * All planes get a 1 dp black border for contrast against satellite imagery.
  *
- * Coloring rule: the lower an aircraft flies, the hotter it reads — brand red
- * at ground level fading through coral and blush to white at cruise. Unknown
- * altitudes are treated as cruise.
- * All planes get a 2 dp black border for contrast against satellite imagery.
- *
- * The plane sits in the upper portion of the bitmap, label hangs below.
- * Anchor with `(0.5, PlaneIcon.anchorY)` on the marker so the plane center
- * lands on the lat/lng position.
+ * The plane sits in the upper square of the bitmap, label hangs below.
+ * Anchor with `(0.5, PlaneMarkerIcon.anchorY)` so the plane center lands on
+ * the lat/lng position.
  */
 internal object PlaneIcon {
 
-    private const val PLANE_DP = 28f
-    // Square area around the plane that contains it at any rotation. Needs
-    // to be at least PLANE_DP * sqrt(2) ≈ 1.414 × PLANE_DP so the corners
-    // don't get clipped when the icon is rotated 45°.
-    private const val PLANE_BOX_DP = 42f
     private const val LABEL_DP = 14f
     private const val LABEL_GAP_DP = 2f
+    private const val BORDER_DP = 1f
 
-    // SVG viewBox is 0 0 122.88 122.88; the path's tip points to the upper-
-    // right (45° CW from up), so we counter-rotate by NATURAL_ROTATION_DEG so
-    // heading=0 (north) makes the nose point straight up on screen.
-    private const val SVG_SIZE = 122.88f
-    private const val NATURAL_ROTATION_DEG = 45f
+    /** Draws every silhouette this much larger than tar1090's base size. */
+    private const val ICON_SCALE = 1.25f
 
-    private const val SVG_PATH_DATA =
-        "M16.63,105.75c0.01-4.03,2.3-7.97,6.03-12.38" +
-            "L1.09,79.73c-1.36-0.59-1.33-1.42-0.54-2.4" +
-            "l4.57-3.9c0.83-0.51,1.71-0.73,2.66-0.47" +
-            "l26.62,4.5l22.18-24.02" +
-            "L4.8,18.41c-1.31-0.77-1.42-1.64-0.07-2.65" +
-            "l7.47-5.96l67.5,18.97" +
-            "L99.64,7.45c6.69-5.79,13.19-8.38,18.18-7.15" +
-            "c2.75,0.68,3.72,1.5,4.57,4.08" +
-            "c1.65,5.06-0.91,11.86-6.96,18.86" +
-            "L94.11,43.18l18.97,67.5" +
-            "l-5.96,7.47c-1.01,1.34-1.88,1.23-2.65-0.07" +
-            "L69.43,66.31L45.41,88.48" +
-            "l4.5,26.62c0.26,0.94,0.05,1.82-0.47,2.66" +
-            "l-3.9,4.57c-0.97,0.79-1.81,0.82-2.4-0.54" +
-            "l-13.64-21.57c-4.43,3.74-8.37,6.03-12.42,6.03" +
-            "C16.71,106.24,16.63,106.11,16.63,105.75" +
-            "L16.63,105.75z"
-
-    private val sourcePath = PathParser.createPathFromPathData(SVG_PATH_DATA)
-
-    /**
-     * Altitude → color ramp (piecewise linear in RGB), walking down the brand
-     * reds as aircraft climb away from the cube:
-     *   ≥ 4000 m         → white
-     *   3000 m … 4000 m  → blush → white
-     *   2000 m … 3000 m  → coral → blush
-     *      0 m … 2000 m  → red → coral
-     *
-     * These mirror the palette in the app theme, which this module cannot see;
-     * keep the two in step.
-     */
-    private val WHITE = intArrayOf(0xFF, 0xFF, 0xFF)
-    private val BLUSH = intArrayOf(0xFF, 0xD6, 0xD6) // brand blush #FFD6D6
-    private val CORAL = intArrayOf(0xFF, 0x6B, 0x6B) // brand coral #FF6B6B
-    private val RED = intArrayOf(0xE5, 0x34, 0x3B) // brand red #E5343B
-
-    /** Anchor for the produced bitmap so the plane's center lands on the point. */
-    val anchorY: Float = (PLANE_BOX_DP / 2f) / (PLANE_BOX_DP + LABEL_GAP_DP + LABEL_DP)
+    /** tar1090 strokes accent lines at 60% of the outline width. */
+    private const val ACCENT_RATIO = 0.6f
 
     fun create(
+        icon: AircraftIcon,
         headingDegrees: Float,
         altitudeMeters: Int?,
+        fillColor: Int,
         density: Float,
-    ): BitmapDescriptor {
-        val planeSizePx = PLANE_DP * density
-        val planeBoxPx = PLANE_BOX_DP * density
+    ): PlaneMarkerIcon {
+        val shape = icon.shape
+        val body = shape.body
+        if (body == null && icon.fallback().shape !== shape) {
+            return create(icon.fallback(), headingDegrees, altitudeMeters, fillColor, density)
+        }
+        val shapeWidthPx = shape.width * icon.scale * ICON_SCALE * density
+        val shapeHeightPx = shape.height * icon.scale * ICON_SCALE * density
+        // Square that holds the shape at any rotation, plus room for the border.
+        val borderPx = BORDER_DP * density
+        val boxPx = ceil(hypot(shapeWidthPx, shapeHeightPx) + 2 * borderPx)
         val labelHeightPx = LABEL_DP * density
         val labelGapPx = LABEL_GAP_DP * density
 
-        // Bitmap = a square big enough to hold the rotated plane + label below.
-        val width = planeBoxPx.toInt()
-        val height = (planeBoxPx + labelGapPx + labelHeightPx).toInt()
-
+        val width = boxPx.toInt()
+        val height = (boxPx + labelGapPx + labelHeightPx).toInt()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        val fillColor = colorForAltitude(altitudeMeters)
-        val borderColor = Color.BLACK
-        val borderDp = 1f
-        val borderPx = borderDp * density
-
-        // Plane sits centered in the upper square (planeBoxPx × planeBoxPx).
-        val centerX = width / 2f
-        val planeCenterY = planeBoxPx / 2f
-
-        // ----- SVG-based plane silhouette, rotated to heading -----
+        // ----- type silhouette, nose up at heading 0, rotated to heading -----
+        val (minX, minY, viewWidth, viewHeight) = shape.viewBox
+        var scaleX = shapeWidthPx / viewWidth
+        var scaleY = shapeHeightPx / viewHeight
+        if (!shape.noAspect) {
+            // SVG's default "xMidYMid meet": uniform scale, centered.
+            scaleX = minOf(scaleX, scaleY)
+            scaleY = scaleX
+        }
         canvas.save()
-        canvas.translate(centerX, planeCenterY)
-        canvas.rotate(headingDegrees - NATURAL_ROTATION_DEG)
-        val scale = planeSizePx / SVG_SIZE
-        canvas.scale(scale, scale)
-        canvas.translate(-SVG_SIZE / 2f, -SVG_SIZE / 2f)
-        canvas.drawPath(sourcePath, fillPaint(fillColor))
-        // Stroke width is given in screen pixels (borderPx). Because we're
-        // drawing in pre-scaled path units, divide by `scale` so the stroke
-        // ends up the requested screen thickness.
-        canvas.drawPath(sourcePath, strokePaint(borderColor, borderPx / scale))
+        canvas.translate(width / 2f, boxPx / 2f)
+        if (!shape.noRotate) canvas.rotate(headingDegrees)
+        canvas.scale(scaleX, scaleY)
+        canvas.translate(-(minX + viewWidth / 2f), -(minY + viewHeight / 2f))
+        // Stroke widths are in path units, so divide the screen width by the
+        // scale to get the requested on-screen thickness.
+        val pathScale = (scaleX + scaleY) / 2f
+        // Like tar1090 (paint-order="stroke"): a double-width stroke under the
+        // fill leaves a border of exactly borderPx outside the silhouette.
+        if (body != null) {
+            canvas.drawPath(body, strokePaint(Color.BLACK, 2 * borderPx / pathScale))
+            canvas.drawPath(body, fillPaint(fillColor))
+        }
+        shape.accents?.let { accents ->
+            canvas.drawPath(
+                accents,
+                strokePaint(Color.BLACK, ACCENT_RATIO * shape.accentMult * borderPx / pathScale),
+            )
+        }
         canvas.restore()
 
         // ----- altitude label, upright, just below the rotation box -----
         if (altitudeMeters != null) {
             val text = "${altitudeMeters} m"
-            val textY = planeBoxPx + labelGapPx + labelHeightPx * 0.82f
+            val textY = boxPx + labelGapPx + labelHeightPx * 0.82f
             canvas.drawText(
                 text,
-                centerX,
+                width / 2f,
                 textY,
                 textOutlinePaint(Color.BLACK, 11f * density, 2.5f * density),
             )
-            canvas.drawText(text, centerX, textY, textFillPaint(Color.WHITE, 11f * density))
+            canvas.drawText(text, width / 2f, textY, textFillPaint(Color.WHITE, 11f * density))
         }
 
-        return BitmapDescriptorFactory.fromBitmap(bitmap)
-    }
-
-    /**
-     * Piecewise color ramp by altitude. Boundary values use the "upper" color
-     * of the segment they fall into (e.g. exactly 4000 m → white).
-     * Null altitude defaults to white (treated as cruise/unknown).
-     */
-    private fun colorForAltitude(altitudeMeters: Int?): Int {
-        if (altitudeMeters == null) return rgb(WHITE)
-        val a = altitudeMeters
-        return when {
-            a >= 4000 -> rgb(WHITE)
-            a >= 3000 -> lerpColor(BLUSH, WHITE, (a - 3000f) / 1000f)
-            a >= 2000 -> lerpColor(CORAL, BLUSH, (a - 2000f) / 1000f)
-            a >= 0 -> lerpColor(RED, CORAL, a / 2000f)
-            else -> rgb(RED)
-        }
-    }
-
-    private fun lerpColor(from: IntArray, to: IntArray, tRaw: Float): Int {
-        val t = tRaw.coerceIn(0f, 1f)
-        return Color.rgb(
-            lerp(from[0], to[0], t),
-            lerp(from[1], to[1], t),
-            lerp(from[2], to[2], t),
+        return PlaneMarkerIcon(
+            descriptor = BitmapDescriptorFactory.fromBitmap(bitmap),
+            anchorY = (boxPx / 2f) / height,
         )
     }
-
-    private fun rgb(c: IntArray): Int = Color.rgb(c[0], c[1], c[2])
-
-    private fun lerp(a: Int, b: Int, t: Float): Int =
-        (a + (b - a) * t).toInt().coerceIn(0, 255)
 
     private fun fillPaint(color: Int) = Paint().apply {
         this.color = color

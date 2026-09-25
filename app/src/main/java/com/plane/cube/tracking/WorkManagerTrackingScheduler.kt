@@ -17,7 +17,13 @@ class WorkManagerTrackingScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : TrackingScheduler {
 
+    /**
+     * Starts the foreground [AreaMonitorService] for fast alerts, plus a
+     * 15-minute WorkManager check as a fallback in case the service is ever
+     * stopped (e.g. Android refused to start it from the background).
+     */
     override fun schedule() {
+        AreaMonitorService.start(context)
         val request = PeriodicWorkRequestBuilder<PlaneCheckWorker>(
             repeatInterval = 15,
             repeatIntervalTimeUnit = TimeUnit.MINUTES,
@@ -37,6 +43,7 @@ class WorkManagerTrackingScheduler @Inject constructor(
     }
 
     override fun cancel() {
+        AreaMonitorService.stop(context)
         WorkManager.getInstance(context).cancelUniqueWork(PlaneCheckWorker.UNIQUE_NAME)
     }
 }

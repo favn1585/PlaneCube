@@ -55,8 +55,8 @@ private fun snapAltitude(meters: Float): Float {
 }
 
 /**
- * Bottom-sheet body holding the controls for area editing: max altitude
- * plus the cancel/save actions.
+ * Bottom-sheet body holding the controls for area editing: max altitude,
+ * warning distance, plus the cancel/save actions.
  *
  * Hosted by a non-modal [androidx.compose.material3.BottomSheetScaffold] so the
  * map behind it keeps receiving taps — corners are still picked while this is
@@ -94,6 +94,34 @@ internal fun FlightSheetContent(
                 onIntent(MapUiIntent.DraftAltitudeChange(snapAltitude(meters)))
             },
             valueRange = EditState.MIN_ALTITUDE_M..EditState.MAX_ALTITUDE_M,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.map_sheet_warning_distance),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = stringResource(
+                    R.string.map_sheet_distance_value,
+                    state.warningDistanceMeters / 1000f,
+                ),
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        Text(
+            text = stringResource(R.string.map_sheet_warning_distance_hint),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Slider(
+            value = state.warningDistanceMeters,
+            onValueChange = { meters ->
+                onIntent(MapUiIntent.DraftWarningDistanceChange(meters))
+            },
+            valueRange = EditState.MIN_WARNING_DISTANCE_M..EditState.MAX_WARNING_DISTANCE_M,
+            // Discrete: one stop every WARNING_DISTANCE_STEP_M between the ends.
+            steps = ((EditState.MAX_WARNING_DISTANCE_M - EditState.MIN_WARNING_DISTANCE_M) /
+                EditState.WARNING_DISTANCE_STEP_M).toInt() - 1,
         )
         state.errorMessage?.let {
             Text(stringResource(it), color = MaterialTheme.colorScheme.error)

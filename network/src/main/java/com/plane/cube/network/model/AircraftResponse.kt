@@ -29,6 +29,8 @@ data class AircraftDto(
     @SerialName("alt_geom") val geometricAltitude: Double? = null,
     @SerialName("track") val track: Double? = null,
     @SerialName("gs") val groundSpeed: Double? = null,
+    @SerialName("t") val typeDesignator: String? = null,
+    @SerialName("category") val category: String? = null,
 )
 
 private const val FEET_TO_METERS = 0.3048
@@ -54,5 +56,7 @@ private fun AircraftDto.toPlaneOrNull(): Plane? {
         velocityMetersPerSec = groundSpeed?.let { it * KNOTS_TO_MPS },
         trueTrackDegrees = track,
         onGround = onGround,
+        typeDesignator = typeDesignator?.trim()?.uppercase()?.takeIf { it.isNotEmpty() },
+        category = category?.trim()?.uppercase()?.takeIf { it.isNotEmpty() },
     )
 }

@@ -1,6 +1,8 @@
 package com.plane.cube.di
 
+import com.plane.cube.domain.PlaneAlerts
 import com.plane.cube.domain.TrackingScheduler
+import com.plane.cube.tracking.PlaneAlertMonitor
 import com.plane.cube.tracking.WorkManagerTrackingScheduler
 import dagger.Binds
 import dagger.Module
@@ -15,4 +17,8 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindTrackingScheduler(impl: WorkManagerTrackingScheduler): TrackingScheduler
+
+    @Binds
+    @Singleton
+    abstract fun bindPlaneAlerts(impl: PlaneAlertMonitor): PlaneAlerts
 }

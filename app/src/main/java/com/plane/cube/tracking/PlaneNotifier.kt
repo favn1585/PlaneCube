@@ -1,11 +1,15 @@
 package com.plane.cube.tracking
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.ContentResolver
+import android.media.AudioAttributes
+import android.net.Uri
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.RingtoneManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -22,6 +26,22 @@ class PlaneNotifier @Inject constructor(
 
     fun ensureChannel() {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        if (manager.getNotificationChannel(MONITOR_CHANNEL_ID) == null) {
+            // Low importance: the ongoing "watching" notice should sit quietly
+            // in the shade, not buzz. Only real alerts use the loud channel.
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    MONITOR_CHANNEL_ID,
+                    "Area monitoring",
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "Shown while PlaneCube watches your tracking area in the background"
+                },
+            )
+        }
+        // A channel's sound can't change once created, so the custom sound
+        // lives on a new channel and the old alarm-sound one is removed.
+        manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         val channel = NotificationChannel(
             CHANNEL_ID,
@@ -31,8 +51,13 @@ class PlaneNotifier @Inject constructor(
             description = "Alerts when a plane enters your tracking area"
             enableLights(true)
             enableVibration(true)
-            val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            setSound(soundUri, null)
+            setSound(
+                Uri.parse("${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.plane_alert}"),
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
         }
         manager.createNotificationChannel(channel)
     }
@@ -50,9 +75,10 @@ class PlaneNotifier @Inject constructor(
         ensureChannel()
 
         val first = planes.first()
-        val title = "Plane near you"
+        val title = "Plane in your area"
         val text = buildString {
             append(first.callsign ?: first.icao24)
+            first.typeDesignator?.let { append(" · $it") }
             first.altitudeMeters?.let { append(" · ${it.toInt()} m") }
             if (planes.size > 1) append(" (+${planes.size - 1} more)")
         }
@@ -64,13 +90,45 @@ class PlaneNotifier @Inject constructor(
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setContentIntent(openAppIntent())
             .build()
 
         NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
     }
 
+    /** The ongoing notification a foreground service must show while it runs. */
+    fun monitoringNotification(): Notification {
+        ensureChannel()
+        return NotificationCompat.Builder(context, MONITOR_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("Watching your area")
+            .setContentText("You'll be alerted when a plane enters it")
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(openAppIntent())
+            .addAction(0, "End tracking", AreaMonitorService.endTrackingIntent(context))
+            // Android 14+ lets users swipe away even ongoing service
+            // notifications; if that happens, put it straight back.
+            .setDeleteIntent(AreaMonitorService.repostNotificationIntent(context))
+            .build()
+    }
+
+    private fun openAppIntent(): PendingIntent? {
+        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?: return null
+        return PendingIntent.getActivity(
+            context,
+            0,
+            launch,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
     companion object {
-        const val CHANNEL_ID = "plane_alerts"
+        const val CHANNEL_ID = "plane_alerts_v2"
+        private const val LEGACY_CHANNEL_ID = "plane_alerts"
+        const val MONITOR_CHANNEL_ID = "area_monitoring"
+        const val MONITOR_NOTIFICATION_ID = 1002
         private const val NOTIFICATION_ID = 1001
     }
 }

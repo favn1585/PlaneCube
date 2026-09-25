@@ -33,6 +33,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -49,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleStartEffect
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
@@ -68,7 +70,9 @@ import com.google.maps.android.compose.Polygon
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.plane.cube.domain.entity.Area
 import com.plane.cube.domain.entity.GeoPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val CAMERA_IDLE_DEBOUNCE_MS = 1_000L
 private const val LOCATE_ZOOM = 12f
@@ -105,6 +109,9 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     }
 
     val context = LocalContext.current
+    val aircraftIcons by produceState<AircraftIcons?>(initialValue = null) {
+        value = withContext(Dispatchers.Default) { AircraftIcons.load(context.applicationContext) }
+    }
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let {
             snackbarHostState.showSnackbar(
@@ -130,6 +137,13 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 )
             }
         }
+    }
+
+    // Only poll while the map is on screen; in the background the area
+    // monitor service handles alerts on its own, much less often.
+    LifecycleStartEffect(Unit) {
+        viewModel.onIntent(MapUiIntent.ScreenVisibleChanged(true))
+        onStopOrDispose { viewModel.onIntent(MapUiIntent.ScreenVisibleChanged(false)) }
     }
 
     // Pause plane updates for the whole gesture: redrawing markers while the
@@ -212,30 +226,41 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 } else {
                     state.preferences?.let { prefs -> AreaPolygon(prefs.area) }
                     val density = LocalDensity.current.density
-                    state.planes.forEach { plane ->
-                        // key() ties each marker's state + icon cache to the
-                        // aircraft identity, so at 1 Hz they move/update in
-                        // place instead of being torn down and recreated.
-                        key(plane.icao24) {
-                            val heading = plane.trueTrackDegrees?.toFloat() ?: 0f
-                            val altitudeM = plane.altitudeMeters?.toInt()
-                            val icon = remember(heading, altitudeM, density) {
-                                PlaneIcon.create(
-                                    headingDegrees = heading,
-                                    altitudeMeters = altitudeM,
-                                    density = density,
+                    // Markers wait for the icon tables, which parse in well
+                    // under a second on first launch.
+                    aircraftIcons?.let { icons ->
+                        state.planes.forEach { plane ->
+                            // key() ties each marker's state + icon cache to the
+                            // aircraft identity, so at 1 Hz they move/update in
+                            // place instead of being torn down and recreated.
+                            key(plane.icao24) {
+                                val aircraftIcon = icons.iconFor(plane)
+                                val heading = plane.trueTrackDegrees?.toFloat() ?: 0f
+                                val altitudeM = plane.altitudeMeters?.toInt()
+                                val fillColor = PlaneColors.colorFor(plane, state.preferences)
+                                val icon = remember(aircraftIcon, heading, altitudeM, fillColor, density) {
+                                    PlaneIcon.create(
+                                        icon = aircraftIcon,
+                                        headingDegrees = heading,
+                                        altitudeMeters = altitudeM,
+                                        fillColor = fillColor,
+                                        density = density,
+                                    )
+                                }
+                                val markerState = remember { MarkerState(plane.position.toLatLng()) }
+                                SideEffect { markerState.position = plane.position.toLatLng() }
+                                Marker(
+                                    state = markerState,
+                                    title = listOfNotNull(
+                                        plane.callsign ?: plane.icao24,
+                                        plane.typeDesignator,
+                                    ).joinToString(" · "),
+                                    snippet = altitudeM?.let { stringResource(R.string.map_marker_altitude, it) },
+                                    icon = icon.descriptor,
+                                    flat = true,
+                                    anchor = Offset(0.5f, icon.anchorY),
                                 )
                             }
-                            val markerState = remember { MarkerState(plane.position.toLatLng()) }
-                            SideEffect { markerState.position = plane.position.toLatLng() }
-                            Marker(
-                                state = markerState,
-                                title = plane.callsign ?: plane.icao24,
-                                snippet = altitudeM?.let { stringResource(R.string.map_marker_altitude, it) },
-                                icon = icon,
-                                flat = true,
-                                anchor = Offset(0.5f, PlaneIcon.anchorY),
-                            )
                         }
                     }
                 }
