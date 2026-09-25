@@ -24,7 +24,8 @@ class PlaneCheckWorker @AssistedInject constructor(
         return runCatching {
             // The feed is queried by radius, so the result also covers the
             // circle around the area; do the exact in-polygon + altitude check.
-            val planes = planeRepository.fetchPlanes(preferences.area)
+            val area = preferences.area
+            val planes = planeRepository.fetchPlanes(area.center, area.radiusNm)
             val inCube = planes.filter { plane ->
                 val altitude = plane.altitudeMeters
                 altitude != null &&

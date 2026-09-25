@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import kotlin.coroutines.cancellation.CancellationException
 import com.plane.cube.domain.TrackingScheduler
 import com.plane.cube.domain.entity.Area
+import com.plane.cube.domain.entity.GeoPoint
 import com.plane.cube.domain.entity.TrackingPreferences
 import com.plane.cube.domain.repository.PlaneRepository
 import com.plane.cube.domain.repository.TrackingPreferencesRepository
@@ -32,6 +33,7 @@ class MapViewModel @Inject constructor(
     val viewState = _viewState.asStateFlow()
 
     private var tickerJob: Job? = null
+    private var activeQuery: PlaneQuery? = null
 
     /**
      * Kept out of the view state on purpose: flipping it must not recompose
@@ -114,8 +116,7 @@ class MapViewModel @Inject constructor(
             }
             state.copy(edit = draft)
         }
-        tickerJob?.cancel()
-        _viewState.update { it.copy(planes = emptyList()) }
+        stopTicker()
     }
 
     private fun stopEditing() {
@@ -161,54 +162,63 @@ class MapViewModel @Inject constructor(
     }
 
     /**
-     * Areas to poll on each tick: the region the user is looking at, plus the
-     * saved tracking area (if any) so it stays monitored even when it is
-     * panned off-screen. The tracking area is dropped when the visible-area
-     * query already covers it, since adsb.fi only allows ~1 request/second
-     * and every extra request slows the refresh rate down.
+     * What one tick fetches. With a saved tracking area, the feed is queried
+     * around the area's center, far enough out to reach [TRACKING_BUFFER_KM]
+     * past its farthest edge, and [clipTo] trims the result to planes inside
+     * the area or within that buffer of its edges. Otherwise it is whatever
+     * the user is looking at.
      */
-    private fun currentQueryAreas(): List<Area> {
-        val state = _viewState.value
-        val visible = state.visibleArea
-        val tracking = state.preferences?.area
-        return when {
-            visible == null -> listOfNotNull(tracking)
-            tracking == null || visible.covers(tracking) -> listOf(visible)
-            else -> listOf(visible, tracking)
-        }
-    }
+    private data class PlaneQuery(
+        val center: GeoPoint,
+        val radiusNm: Double,
+        val clipTo: Area? = null,
+    )
 
-    /** Whether this area's feed query (a radius-capped circle) includes all of [other]. */
-    private fun Area.covers(other: Area): Boolean {
-        val reach = minOf(radiusNm, PlaneRepository.MAX_QUERY_RADIUS_NM)
-        return other.corners.all { center.distanceNmTo(it) <= reach }
+    private fun currentQuery(): PlaneQuery? {
+        val state = _viewState.value
+        state.preferences?.area?.let { tracking ->
+            return PlaneQuery(
+                center = tracking.center,
+                radiusNm = tracking.radiusNm + TRACKING_BUFFER_KM / KM_PER_NM,
+                clipTo = tracking,
+            )
+        }
+        return state.visibleArea?.let { PlaneQuery(it.center, it.radiusNm) }
     }
 
     private fun maybeRestartTicker() {
         val state = _viewState.value
         if (state.edit.active) {
             Log.d(TAG, "Ticker stopped: edit mode active")
-            tickerJob?.cancel()
-            _viewState.update { it.copy(planes = emptyList()) }
+            stopTicker()
             return
         }
-        val areas = currentQueryAreas()
-        if (areas.isEmpty()) {
+        val query = currentQuery()
+        if (query == null) {
             Log.d(
                 TAG,
                 "Ticker stopped: no query area (preferences=${state.preferences != null}, userLocation=${state.userLocation})",
             )
-            tickerJob?.cancel()
-            _viewState.update { it.copy(planes = emptyList()) }
+            stopTicker()
             return
         }
-        Log.d(TAG, "maybeRestartTicker areas=${areas.size}")
+        // Panning the map doesn't change a tracking-area query, so don't
+        // throw away a running loop for nothing.
+        if (query == activeQuery && tickerJob?.isActive == true) return
+        Log.d(TAG, "maybeRestartTicker center=${query.center} radiusNm=${query.radiusNm}")
+        activeQuery = query
         restartTicker()
+    }
+
+    private fun stopTicker() {
+        tickerJob?.cancel()
+        activeQuery = null
+        _viewState.update { it.copy(planes = emptyList()) }
     }
 
     /**
      * (Re)starts the single polling loop, so its first tick fetches right away
-     * for the new area. Restarting instead of firing a parallel refresh keeps
+     * for the new query. Restarting instead of firing a parallel refresh keeps
      * requests from piling up behind the rate limiter, and keeps an older
      * response from landing after a newer one.
      */
@@ -226,45 +236,43 @@ class MapViewModel @Inject constructor(
     }
 
     private fun refreshNow() {
-        if (_viewState.value.edit.active || currentQueryAreas().isEmpty()) return
+        if (_viewState.value.edit.active || currentQuery() == null) return
         restartTicker()
     }
 
     private suspend fun refresh() {
         if (_viewState.value.edit.active || cameraMoving) return
-        val areas = currentQueryAreas()
-        if (areas.isEmpty()) return
-        var lastError: Throwable? = null
-        val results = areas.mapNotNull { area ->
-            try {
-                planeRepository.fetchPlanes(area)
-            } catch (cancellation: CancellationException) {
-                // Don't swallow coroutine cancellation; let it propagate so the
-                // surrounding ticker can stop cleanly.
-                throw cancellation
-            } catch (error: Throwable) {
-                Log.w(TAG, "adsb.fi request failed", error)
-                lastError = error
-                null
-            }
+        val query = currentQuery() ?: return
+        val fetched = try {
+            planeRepository.fetchPlanes(query.center, query.radiusNm)
+        } catch (cancellation: CancellationException) {
+            // Don't swallow coroutine cancellation; let it propagate so the
+            // surrounding ticker can stop cleanly.
+            throw cancellation
+        } catch (error: Throwable) {
+            Log.w(TAG, "adsb.fi request failed", error)
+            _viewState.update { it.copy(errorMessage = R.string.map_error_plane_fetch) }
+            return
         }
         // A gesture started while the request was in flight: drop the result
         // rather than redraw markers under the user's finger. The next tick
         // after the camera settles will fetch fresh data.
         if (cameraMoving) return
-        if (results.isEmpty() && lastError != null) {
-            _viewState.update { it.copy(errorMessage = R.string.map_error_plane_fetch) }
-            return
-        }
-        // Every plane is shown regardless of altitude; the tracking area's
-        // altitude ceiling only drives the background notification check.
-        val planes = results.flatten().distinctBy { it.icao24 }
-        Log.d(TAG, "adsb.fi: ${planes.size} planes across ${areas.size} area(s)")
+        // Every plane in range is shown regardless of altitude; the tracking
+        // area's altitude ceiling only drives the background notification check.
+        val planes = query.clipTo?.let { area ->
+            fetched.filter { area.distanceKmTo(it.position) <= TRACKING_BUFFER_KM }
+        } ?: fetched
+        Log.d(TAG, "adsb.fi: ${fetched.size} planes fetched, ${planes.size} shown")
         _viewState.update { it.copy(planes = planes, errorMessage = null) }
     }
 
     companion object {
         private const val TAG = "MapViewModel"
         private const val REFRESH_INTERVAL_MS = 1_000L
+
+        /** How far past the tracking area's edges planes are still shown. */
+        private const val TRACKING_BUFFER_KM = 50.0
+        private const val KM_PER_NM = 1.852
     }
 }

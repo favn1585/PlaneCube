@@ -1,22 +1,18 @@
 package com.plane.cube.domain.repository
 
-import com.plane.cube.domain.entity.Area
+import com.plane.cube.domain.entity.GeoPoint
 import com.plane.cube.domain.entity.Plane
 
 interface PlaneRepository {
 
     /**
-     * Planes in and around [area]. The result may include aircraft slightly
-     * outside it (the feed is queried by radius), so callers that need an
-     * exact match should check [Area.contains].
+     * Planes within [radiusNm] nautical miles of [center]. The radius is
+     * clamped to [MAX_QUERY_RADIUS_NM].
      */
-    suspend fun fetchPlanes(area: Area): List<Plane>
+    suspend fun fetchPlanes(center: GeoPoint, radiusNm: Double): List<Plane>
 
     companion object {
-        /**
-         * Largest radius the feed serves (adsb.fi caps queries at 250 NM).
-         * Areas wider than this are only covered around their center.
-         */
+        /** Largest radius the feed serves (adsb.fi caps queries at 250 NM). */
         const val MAX_QUERY_RADIUS_NM = 250.0
     }
 }

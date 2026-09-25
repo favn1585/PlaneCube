@@ -1,5 +1,8 @@
 package com.plane.cube.domain.entity
 
+import kotlin.math.cos
+import kotlin.math.hypot
+
 /**
  * An oriented rectangular area on the Earth's surface defined by four corners
  * in order (any winding). The corners may be axis-aligned (north-up) or rotated
@@ -30,6 +33,25 @@ data class Area(
     /** Radius of the smallest circle around [center] that reaches every corner. */
     val radiusNm: Double get() = corners.maxOf { center.distanceNmTo(it) }
 
+    /**
+     * Distance from [point] to the area in kilometers: 0 inside, otherwise the
+     * distance to the nearest edge. Uses a local flat projection around the
+     * point, which is accurate to well under 1% at the scales of a tracking
+     * area plus its buffer.
+     */
+    fun distanceKmTo(point: GeoPoint): Double {
+        if (contains(point)) return 0.0
+        val kmPerDegLat = KM_PER_DEG_LAT
+        val kmPerDegLon = KM_PER_DEG_LAT * cos(Math.toRadians(point.latitude))
+        fun x(p: GeoPoint) = (p.longitude - point.longitude) * kmPerDegLon
+        fun y(p: GeoPoint) = (p.latitude - point.latitude) * kmPerDegLat
+        return corners.indices.minOf { i ->
+            val a = corners[i]
+            val b = corners[(i + 1) % corners.size]
+            distanceToSegment(x(a), y(a), x(b), y(b))
+        }
+    }
+
     /** Polygon point-in-polygon test using the ray-casting algorithm. */
     fun contains(point: GeoPoint): Boolean {
         var inside = false
@@ -47,7 +69,18 @@ data class Area(
         return inside
     }
 
+    /** Distance from the origin to segment (ax, ay)–(bx, by). */
+    private fun distanceToSegment(ax: Double, ay: Double, bx: Double, by: Double): Double {
+        val dx = bx - ax
+        val dy = by - ay
+        val lengthSq = dx * dx + dy * dy
+        val t = if (lengthSq == 0.0) 0.0 else ((-ax * dx - ay * dy) / lengthSq).coerceIn(0.0, 1.0)
+        return hypot(ax + t * dx, ay + t * dy)
+    }
+
     companion object {
+        private const val KM_PER_DEG_LAT = 111.32
+
         /** Build an axis-aligned (north-up) rectangle from two diagonal corners. */
         fun of(a: GeoPoint, b: GeoPoint): Area {
             val south = minOf(a.latitude, b.latitude)
