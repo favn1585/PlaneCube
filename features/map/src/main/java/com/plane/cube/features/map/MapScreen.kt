@@ -21,7 +21,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -290,7 +289,6 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                     },
                     icon = Icons.Default.MyLocation,
                     contentDescription = stringResource(R.string.map_action_my_location),
-                    small = false,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .navigationBarsPadding()
@@ -314,7 +312,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
 }
 
 /**
- * Round map control: brand blue with a white glyph in both themes, so it reads
+ * Round map control: white with a brand-blue glyph in both themes, so it reads
  * the same over dark satellite imagery and bright terrain.
  */
 @Composable
@@ -323,31 +321,16 @@ private fun MapOverlayButton(
     icon: ImageVector,
     contentDescription: String,
     modifier: Modifier = Modifier,
-    small: Boolean = true,
     iconModifier: Modifier = Modifier,
 ) {
-    val containerColor = MaterialTheme.colorScheme.primary
-    val content: @Composable () -> Unit = {
+    FloatingActionButton(
+        onClick = onClick,
+        shape = CircleShape,
+        containerColor = Color.White,
+        contentColor = MaterialTheme.colorScheme.primary,
+        modifier = modifier,
+    ) {
         Icon(icon, contentDescription = contentDescription, modifier = iconModifier)
-    }
-    if (small) {
-        SmallFloatingActionButton(
-            onClick = onClick,
-            shape = CircleShape,
-            containerColor = containerColor,
-            contentColor = Color.White,
-            modifier = modifier,
-            content = content,
-        )
-    } else {
-        FloatingActionButton(
-            onClick = onClick,
-            shape = CircleShape,
-            containerColor = containerColor,
-            contentColor = Color.White,
-            modifier = modifier,
-            content = content,
-        )
     }
 }
 
