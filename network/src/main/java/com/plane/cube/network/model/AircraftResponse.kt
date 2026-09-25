@@ -9,14 +9,14 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * dump1090 `aircraft.json`. dump1090 reports altitude in **feet** and speed in
- * **knots**; the `altitude` field is the string `"ground"` when a plane is on
- * the ground, hence the lenient [JsonElement] type.
+ * readsb v3 response (adsb.fi). Altitude is in **feet** and ground speed in
+ * **knots**; `alt_baro` is the string `"ground"` when a plane is on the ground,
+ * hence the lenient [JsonElement] type.
  */
 @Serializable
 data class AircraftResponse(
     @SerialName("now") val now: Double = 0.0,
-    @SerialName("aircraft") val aircraft: List<AircraftDto> = emptyList(),
+    @SerialName("ac") val aircraft: List<AircraftDto> = emptyList(),
 )
 
 @Serializable
@@ -25,9 +25,10 @@ data class AircraftDto(
     @SerialName("flight") val flight: String? = null,
     @SerialName("lat") val lat: Double? = null,
     @SerialName("lon") val lon: Double? = null,
-    @SerialName("altitude") val altitude: JsonElement? = null,
+    @SerialName("alt_baro") val altitude: JsonElement? = null,
+    @SerialName("alt_geom") val geometricAltitude: Double? = null,
     @SerialName("track") val track: Double? = null,
-    @SerialName("speed") val speed: Double? = null,
+    @SerialName("gs") val groundSpeed: Double? = null,
 )
 
 private const val FEET_TO_METERS = 0.3048
@@ -42,15 +43,15 @@ private fun AircraftDto.toPlaneOrNull(): Plane? {
 
     val altitudeContent = altitude?.jsonPrimitive?.content
     val onGround = altitudeContent.equals("ground", ignoreCase = true)
-    val altitudeFeet = if (onGround) null else altitude?.jsonPrimitive?.doubleOrNull
+    val altitudeFeet = if (onGround) null else altitude?.jsonPrimitive?.doubleOrNull ?: geometricAltitude
 
     return Plane(
-        icao24 = icao,
+        icao24 = icao.removePrefix("~"),
         callsign = flight?.trim()?.takeIf { it.isNotEmpty() },
         originCountry = null,
         position = GeoPoint(latitude, longitude),
         altitudeMeters = altitudeFeet?.let { it * FEET_TO_METERS },
-        velocityMetersPerSec = speed?.let { it * KNOTS_TO_MPS },
+        velocityMetersPerSec = groundSpeed?.let { it * KNOTS_TO_MPS },
         trueTrackDegrees = track,
         onGround = onGround,
     )

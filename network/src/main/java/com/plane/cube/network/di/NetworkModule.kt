@@ -4,6 +4,7 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
 import com.plane.cube.domain.repository.PlaneRepository
 import com.plane.cube.network.BuildConfig
 import com.plane.cube.network.Endpoints
+import com.plane.cube.network.RateLimitInterceptor
 import com.plane.cube.network.api.AdsbApi
 import com.plane.cube.network.repository.PlaneNetworkRepository
 import dagger.Binds
@@ -33,6 +34,7 @@ abstract class NetworkBindingsModule {
 object NetworkModule {
 
     private const val JSON_MEDIA_TYPE = "application/json"
+    private const val MIN_REQUEST_INTERVAL_MS = 1_000L
 
     @Provides
     @Singleton
@@ -49,6 +51,7 @@ object NetworkModule {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
+            .addInterceptor(RateLimitInterceptor(MIN_REQUEST_INTERVAL_MS))
         // HTTP logging only in debug builds, so the feed URL never lands in
         // release logcat.
         if (BuildConfig.DEBUG) {

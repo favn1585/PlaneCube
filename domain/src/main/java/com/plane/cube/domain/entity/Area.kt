@@ -12,7 +12,7 @@ data class Area(
         require(corners.size == 4) { "Area must have exactly 4 corners, got ${corners.size}" }
     }
 
-    /** Axis-aligned bounding box, useful for API queries like OpenSky's bbox. */
+    /** Axis-aligned bounding box, e.g. for logging or map bounds. */
     val south: Double get() = corners.minOf { it.latitude }
     val west: Double get() = corners.minOf { it.longitude }
     val north: Double get() = corners.maxOf { it.latitude }
@@ -26,6 +26,9 @@ data class Area(
             corners.sumOf { it.latitude } / corners.size.toDouble(),
             corners.sumOf { it.longitude } / corners.size.toDouble(),
         )
+
+    /** Radius of the smallest circle around [center] that reaches every corner. */
+    val radiusNm: Double get() = corners.maxOf { center.distanceNmTo(it) }
 
     /** Polygon point-in-polygon test using the ray-casting algorithm. */
     fun contains(point: GeoPoint): Boolean {

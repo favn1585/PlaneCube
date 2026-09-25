@@ -11,7 +11,6 @@ data class MapViewState(
     val userLocation: GeoPoint? = null,
     val preferences: TrackingPreferences? = null,
     val planes: List<Plane> = emptyList(),
-    val isRefreshing: Boolean = false,
     @param:StringRes val errorMessage: Int? = null,
     val edit: EditState = EditState(),
     /** The lat/lng bbox the user is currently looking at on the map. */
@@ -51,4 +50,6 @@ sealed class MapUiIntent {
     data class DraftAltitudeChange(val meters: Float) : MapUiIntent()
     /** Emitted by the screen when the camera has been idle for the debounce window. */
     data class UpdateVisibleArea(val area: Area) : MapUiIntent()
+    /** The user started or stopped panning/zooming/rotating the map. */
+    data class CameraMovingChanged(val moving: Boolean) : MapUiIntent()
 }

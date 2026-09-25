@@ -133,6 +133,12 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         }
     }
 
+    // Pause plane updates for the whole gesture: redrawing markers while the
+    // camera moves is what makes the map stutter.
+    LaunchedEffect(cameraState.isMoving) {
+        viewModel.onIntent(MapUiIntent.CameraMovingChanged(cameraState.isMoving))
+    }
+
     // When the user stops panning/zooming, debounce 5s, then push the current
     // visible region to the VM so it can fetch planes. While editing, the VM
     // ignores fetches, so we skip the side effect entirely.
