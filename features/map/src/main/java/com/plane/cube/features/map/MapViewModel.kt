@@ -129,7 +129,7 @@ class MapViewModel @Inject constructor(
             }
             state.copy(edit = draft)
         }
-        stopTicker()
+        // Planes keep updating while the area is being edited.
     }
 
     private fun stopEditing() {
@@ -214,11 +214,6 @@ class MapViewModel @Inject constructor(
     private fun maybeRestartTicker() {
         if (!screenVisible) return
         val state = _viewState.value
-        if (state.edit.active) {
-            Log.d(TAG, "Ticker stopped: edit mode active")
-            stopTicker()
-            return
-        }
         val query = currentQuery()
         if (query == null) {
             Log.d(
@@ -262,12 +257,12 @@ class MapViewModel @Inject constructor(
     }
 
     private fun refreshNow() {
-        if (_viewState.value.edit.active || currentQuery() == null) return
+        if (currentQuery() == null) return
         restartTicker()
     }
 
     private suspend fun refresh() {
-        if (_viewState.value.edit.active || cameraMoving) return
+        if (cameraMoving) return
         val query = currentQuery() ?: return
         val fetched = try {
             planeRepository.fetchPlanes(query.center, query.radiusNm)

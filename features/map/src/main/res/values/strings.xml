@@ -14,6 +14,11 @@
     <string name="map_permission_dialog_grant">Grant</string>
     <string name="map_permission_dialog_dismiss">Not now</string>
 
+    <!-- Background usage (battery optimization) dialog -->
+    <string name="map_background_dialog_title">Allow background tracking</string>
+    <string name="map_background_dialog_body">To alert you the moment a plane enters your area, PlaneCube needs to keep running in the background. On the next screen, allow unrestricted battery use.</string>
+    <string name="map_background_dialog_allow">Allow</string>
+
     <!-- Control sheet -->
     <string name="map_sheet_max_altitude">Max altitude</string>
     <string name="map_sheet_altitude_value">%1$d m</string>

@@ -39,9 +39,9 @@ class PlaneNotifier @Inject constructor(
                 },
             )
         }
-        // A channel's sound can't change once created, so the custom sound
-        // lives on a new channel and the old alarm-sound one is removed.
-        manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+        // A channel's sound can't change once created, so each new alert sound
+        // gets a new channel and the earlier ones are removed.
+        LEGACY_CHANNEL_IDS.forEach(manager::deleteNotificationChannel)
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         val channel = NotificationChannel(
             CHANNEL_ID,
@@ -92,6 +92,11 @@ class PlaneNotifier @Inject constructor(
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setContentIntent(openAppIntent())
             .build()
+            .apply {
+                // Loop the sound until the user opens or dismisses the alert
+                // (or pulls down the shade).
+                flags = flags or Notification.FLAG_INSISTENT
+            }
 
         NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
     }
@@ -125,8 +130,8 @@ class PlaneNotifier @Inject constructor(
     }
 
     companion object {
-        const val CHANNEL_ID = "plane_alerts_v2"
-        private const val LEGACY_CHANNEL_ID = "plane_alerts"
+        const val CHANNEL_ID = "plane_alerts_v3"
+        private val LEGACY_CHANNEL_IDS = listOf("plane_alerts", "plane_alerts_v2")
         const val MONITOR_CHANNEL_ID = "area_monitoring"
         const val MONITOR_NOTIFICATION_ID = 1002
         private const val NOTIFICATION_ID = 1001

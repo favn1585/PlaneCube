@@ -1,6 +1,15 @@
 package com.plane.cube.features.map
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import android.os.Build
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
@@ -110,7 +119,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
 
     val context = LocalContext.current
     val aircraftIcons by produceState<AircraftIcons?>(initialValue = null) {
-        value = withContext(Dispatchers.Default) { AircraftIcons.load(context.applicationContext) }
+        value = withContext(Dispatchers.Default) { AircraftIcons().apply { warmUp() } }
     }
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let {
@@ -152,11 +161,9 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         viewModel.onIntent(MapUiIntent.CameraMovingChanged(cameraState.isMoving))
     }
 
-    // When the user stops panning/zooming, debounce 5s, then push the current
-    // visible region to the VM so it can fetch planes. While editing, the VM
-    // ignores fetches, so we skip the side effect entirely.
-    LaunchedEffect(cameraState.isMoving, state.edit.active) {
-        if (state.edit.active) return@LaunchedEffect
+    // When the user stops panning/zooming, debounce, then push the current
+    // visible region to the VM so it can fetch planes.
+    LaunchedEffect(cameraState.isMoving) {
         if (cameraState.isMoving) return@LaunchedEffect
         kotlinx.coroutines.delay(CAMERA_IDLE_DEBOUNCE_MS)
         val projection = cameraState.projection ?: return@LaunchedEffect
@@ -221,46 +228,47 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 // to move them.
                 contentPadding = PaddingValues(bottom = OVERLAY_BUTTON_ROW_HEIGHT),
             ) {
+                // While editing, show the draft instead of the saved area.
                 if (state.edit.active) {
                     state.edit.area?.let { AreaPolygon(it) }
                 } else {
                     state.preferences?.let { prefs -> AreaPolygon(prefs.area) }
-                    val density = LocalDensity.current.density
-                    // Markers wait for the icon tables, which parse in well
-                    // under a second on first launch.
-                    aircraftIcons?.let { icons ->
-                        state.planes.forEach { plane ->
-                            // key() ties each marker's state + icon cache to the
-                            // aircraft identity, so at 1 Hz they move/update in
-                            // place instead of being torn down and recreated.
-                            key(plane.icao24) {
-                                val aircraftIcon = icons.iconFor(plane)
-                                val heading = plane.trueTrackDegrees?.toFloat() ?: 0f
-                                val altitudeM = plane.altitudeMeters?.toInt()
-                                val fillColor = PlaneColors.colorFor(plane, state.preferences)
-                                val icon = remember(aircraftIcon, heading, altitudeM, fillColor, density) {
-                                    PlaneIcon.create(
-                                        icon = aircraftIcon,
-                                        headingDegrees = heading,
-                                        altitudeMeters = altitudeM,
-                                        fillColor = fillColor,
-                                        density = density,
-                                    )
-                                }
-                                val markerState = remember { MarkerState(plane.position.toLatLng()) }
-                                SideEffect { markerState.position = plane.position.toLatLng() }
-                                Marker(
-                                    state = markerState,
-                                    title = listOfNotNull(
-                                        plane.callsign ?: plane.icao24,
-                                        plane.typeDesignator,
-                                    ).joinToString(" · "),
-                                    snippet = altitudeM?.let { stringResource(R.string.map_marker_altitude, it) },
-                                    icon = icon.descriptor,
-                                    flat = true,
-                                    anchor = Offset(0.5f, icon.anchorY),
+                }
+                val density = LocalDensity.current.density
+                // Markers wait for the icon tables, which parse in well
+                // under a second on first launch.
+                aircraftIcons?.let { icons ->
+                    state.planes.forEach { plane ->
+                        // key() ties each marker's state + icon cache to the
+                        // aircraft identity, so at 1 Hz they move/update in
+                        // place instead of being torn down and recreated.
+                        key(plane.icao24) {
+                            val aircraftIcon = icons.iconFor(plane)
+                            val heading = plane.trueTrackDegrees?.toFloat() ?: 0f
+                            val altitudeM = plane.altitudeMeters?.toInt()
+                            val fillColor = PlaneColors.colorFor(plane, state.preferences)
+                            val icon = remember(aircraftIcon, heading, altitudeM, fillColor, density) {
+                                PlaneIcon.create(
+                                    icon = aircraftIcon,
+                                    headingDegrees = heading,
+                                    altitudeMeters = altitudeM,
+                                    fillColor = fillColor,
+                                    density = density,
                                 )
                             }
+                            val markerState = remember { MarkerState(plane.position.toLatLng()) }
+                            SideEffect { markerState.position = plane.position.toLatLng() }
+                            Marker(
+                                state = markerState,
+                                title = listOfNotNull(
+                                    plane.callsign ?: plane.icao24,
+                                    plane.typeDesignator,
+                                ).joinToString(" · "),
+                                snippet = altitudeM?.let { stringResource(R.string.map_marker_altitude, it) },
+                                icon = icon.descriptor,
+                                flat = true,
+                                anchor = Offset(0.5f, icon.anchorY),
+                            )
                         }
                     }
                 }
@@ -334,6 +342,69 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
             onDismiss = { permissionDismissed = true },
         )
     }
+
+    // Background tracking only survives Samsung/Android battery savers when
+    // the app is exempt from battery optimization, so ask once per launch,
+    // after the permission dialog, until the user allows it.
+    var batteryUnrestricted by remember { mutableStateOf(isBatteryUnrestricted(context)) }
+    LifecycleResumeEffect(Unit) {
+        // Picks up the answer when returning from the system dialog.
+        batteryUnrestricted = isBatteryUnrestricted(context)
+        onPauseOrDispose { }
+    }
+    var batteryDismissed by rememberSaveable { mutableStateOf(false) }
+    if (!showPermissionDialog && !batteryUnrestricted && !batteryDismissed) {
+        BackgroundUsageDialog(
+            onAllow = {
+                batteryDismissed = true
+                requestBatteryUnrestricted(context)
+            },
+            onDismiss = { batteryDismissed = true },
+        )
+    }
+}
+
+private fun isBatteryUnrestricted(context: Context): Boolean =
+    context.getSystemService(PowerManager::class.java)
+        ?.isIgnoringBatteryOptimizations(context.packageName) ?: true
+
+/** Opens the system "Allow unrestricted battery use?" prompt for this app. */
+@SuppressLint("BatteryLife") // Near-real-time alerts are the app's core feature.
+private fun requestBatteryUnrestricted(context: Context) {
+    val request = Intent(
+        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+        Uri.parse("package:${context.packageName}"),
+    )
+    try {
+        context.startActivity(request)
+    } catch (_: ActivityNotFoundException) {
+        // Some builds lack the direct prompt; fall back to the full list.
+        context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+    }
+}
+
+@Composable
+private fun BackgroundUsageDialog(
+    onAllow: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
+        title = { Text(stringResource(R.string.map_background_dialog_title)) },
+        text = {
+            Text(
+                stringResource(R.string.map_background_dialog_body),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onAllow) { Text(stringResource(R.string.map_background_dialog_allow)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.map_permission_dialog_dismiss)) }
+        },
+    )
 }
 
 /**
